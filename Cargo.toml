@@ -1,0 +1,15 @@
+[package]
+name = "polyfield"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Plugin SDK for the Polyfield anti-cheat framework"
+repository = "https://github.com/TFireOps/polyfield-sdk"
+readme = "README.md"
+
+[lib]
+name = "polyfield"
+
+[dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
