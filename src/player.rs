@@ -41,6 +41,7 @@ use std::os::raw::c_char;
 use crate::abi::HostApi;
 use crate::events::PlayerRef;
 use crate::fields as f;
+use crate::game_enums::{ClassRole, UserState, WeaponId};
 
 /// Handle for interacting with a single player.
 ///
@@ -140,10 +141,26 @@ impl<'ctx> Player<'ctx> {
     pub fn respawn_timer(&self) -> f32 { self.read_f32(f::F_RESPAWN_TIMER) }
     /// `doneLoadingMap` — finished loading the current map.
     pub fn done_loading_map(&self) -> bool { self.read_bool(f::F_DONE_LOADING_MAP) }
-    /// `myState` — UserState enum (raw integer).
-    pub fn user_state(&self) -> i32 { self.read_i32(f::F_USER_STATE) }
-    /// `myClass` — ClassRole enum (raw integer).
-    pub fn class_role(&self) -> i32 { self.read_i32(f::F_CLASS_ROLE) }
+    /// `myState` — raw `UserState` integer. See [`user_state`](Self::user_state)
+    /// for the typed view.
+    pub fn user_state_raw(&self) -> i32 { self.read_i32(f::F_USER_STATE) }
+    /// `myState` as a typed [`UserState`]. `None` if the game sent an
+    /// unknown value.
+    ///
+    /// `myState` 的类型化 [`UserState`]。游戏发送未知值时返回 `None`。
+    pub fn user_state(&self) -> Option<UserState> {
+        UserState::from_raw(self.user_state_raw())
+    }
+    /// `myClass` — raw `ClassRole` integer. See [`class_role`](Self::class_role)
+    /// for the typed view.
+    pub fn class_role_raw(&self) -> i32 { self.read_i32(f::F_CLASS_ROLE) }
+    /// `myClass` as a typed [`ClassRole`]. `None` if the game sent an
+    /// unknown value.
+    ///
+    /// `myClass` 的类型化 [`ClassRole`]。游戏发送未知值时返回 `None`。
+    pub fn class_role(&self) -> Option<ClassRole> {
+        ClassRole::from_raw(self.class_role_raw())
+    }
 
     // ── Stats / counters ────────────────────────────────────────────────
 
@@ -159,8 +176,41 @@ impl<'ctx> Player<'ctx> {
     pub fn ping_warn(&self) -> i32 { self.read_i32(f::F_PING_WARN) }
     pub fn teamkill_warn(&self) -> i32 { self.read_i32(f::F_TEAMKILL_WARN) }
 
+    /// Kill/death ratio. Returns the kill count when the player hasn't
+    /// died yet (avoids division by zero), `0.0` when both are zero.
+    ///
+    /// 击杀/死亡比。玩家尚未死亡时返回击杀数（避免除零），两者都为
+    /// 零时返回 `0.0`。
+    pub fn kdr(&self) -> f32 {
+        let deaths = self.death_count();
+        if deaths <= 0 {
+            self.kill_count() as f32
+        } else {
+            self.kill_count() as f32 / deaths as f32
+        }
+    }
+
     // ── Movement / pose ─────────────────────────────────────────────────
 
+    /// `playerSpeed` — the player's **configured move-speed constant**, a
+    /// static stat set from the class/loadout. **This is NOT instantaneous
+    /// velocity.** It does not change as the player moves, stops, or gets
+    /// boosted, so it is useless for speed-hack detection.
+    ///
+    /// `playerSpeed` —— 玩家**配置的移动速度常量**，由兵种/装备写死的静态
+    /// 属性。**不是实时速度。** 玩家移动、静止、加速都不会改变它，因此
+    /// 对加速作弊检测毫无用处。
+    ///
+    /// For actual movement speed, take the magnitude of
+    /// [`velocity`](Self::velocity) (or [`net_velocity`](Self::net_velocity)
+    /// for the un-fallback'd value) — e.g. `Vec3::from(p.velocity()).magnitude_2d()`
+    /// for ground speed. That reads the replicated `_recivedVel`.
+    ///
+    /// 实时移动速度请取 [`velocity`](Self::velocity) 的模长（需要未回退值
+    /// 用 [`net_velocity`](Self::net_velocity)）——例如地面速度用
+    /// `Vec3::from(p.velocity()).magnitude_2d()`，它读的是同步过来的
+    /// `_recivedVel`。
+    pub fn speed(&self) -> f32 { self.read_f32(f::F_PLAYER_SPEED) }
     pub fn is_running(&self) -> bool { self.read_bool(f::F_RUNNING) }
     pub fn is_grounded(&self) -> bool { self.read_bool(f::F_GROUNDED) }
     /// `crouch` — crouch state level (int).
@@ -231,6 +281,20 @@ impl<'ctx> Player<'ctx> {
     /// `_lookDir` — 2D look direction.
     pub fn look_dir(&self) -> [f32; 2] { self.read_vec2(f::F_LOOK_DIR) }
 
+    /// [`position`](Self::position) as a [`Vec3`](crate::Vec3), for ergonomic
+    /// distance math (`p.pos().distance_2d(other.pos())`).
+    ///
+    /// [`position`](Self::position) 的 [`Vec3`](crate::Vec3) 形式，方便做
+    /// 距离运算（`p.pos().distance_2d(other.pos())`）。
+    pub fn pos(&self) -> crate::Vec3 { self.position().into() }
+
+    /// [`velocity`](Self::velocity) as a [`Vec3`](crate::Vec3). Pair with
+    /// [`Vec3::magnitude_2d`](crate::Vec3::magnitude_2d) for ground speed.
+    ///
+    /// [`velocity`](Self::velocity) 的 [`Vec3`](crate::Vec3) 形式。配合
+    /// [`Vec3::magnitude_2d`](crate::Vec3::magnitude_2d) 得地面速度。
+    pub fn vel(&self) -> crate::Vec3 { self.velocity().into() }
+
     // ── Combat-adjacent ─────────────────────────────────────────────────
 
     pub fn trying_to_attack(&self) -> f32 { self.read_f32(f::F_TRYING_TO_ATTACK) }
@@ -276,11 +340,20 @@ impl<'ctx> Player<'ctx> {
     }
 
     /// Currently equipped weapon id from `playerCombat.currWeaponID`.
-    /// Pair with [`crate::game_enums::WeaponId::from_raw`] for a typed view.
+    /// See [`weapon`](Self::weapon) for the typed view.
     ///
-    /// 当前装备武器 ID（来自 `playerCombat.currWeaponID`）。可配合
-    /// [`crate::game_enums::WeaponId::from_raw`] 转为带类型的枚举。
+    /// 当前装备武器 ID（来自 `playerCombat.currWeaponID`）。类型化视图
+    /// 见 [`weapon`](Self::weapon)。
     pub fn weapon_id(&self) -> i32 { self.read_i32(f::F_WEAPON_ID) }
+
+    /// Currently equipped weapon as a typed [`WeaponId`]. `None` if the
+    /// raw id doesn't map to a known weapon.
+    ///
+    /// 当前装备武器的类型化 [`WeaponId`]。原始 id 不对应已知武器时
+    /// 返回 `None`。
+    pub fn weapon(&self) -> Option<WeaponId> {
+        WeaponId::from_raw(self.weapon_id())
+    }
 
     /// GameObject name (slot identifier set at spawn — e.g. `"Player3"`).
     /// **Different from [`name`](Self::name), which is the editable
@@ -398,6 +471,102 @@ impl<'ctx> Player<'ctx> {
     pub fn kick_with_reason(&self, title: &str, body: &str, delay_secs: f32) {
         self.show_error(title, body);
         self.kick_me(delay_secs);
+    }
+
+    /// Send a chat message visible to **only this player's client**
+    /// (directed RPC). For a server-wide broadcast use
+    /// [`Ctx::host_say`](crate::Ctx::host_say). Use [`color`](crate::color)
+    /// to colourise.
+    ///
+    /// 仅向**该玩家自己的客户端**发送聊天消息（定向 RPC）。全服广播
+    /// 用 [`Ctx::host_say`](crate::Ctx::host_say)。染色用
+    /// [`color`](crate::color)。
+    pub fn send_chat_to(&self, msg: &str) {
+        let c = CString::new(msg).unwrap_or_default();
+        unsafe { (self.host.player_send_chat)(self.id, c.as_ptr()) };
+    }
+
+    /// Force this player's display name via
+    /// `PlayerControl.RpcUpdateName`. Useful for sanitising names (e.g.
+    /// stripping rich-text exploits) or stamping a slot prefix.
+    ///
+    /// 通过 `PlayerControl.RpcUpdateName` 强制设置该玩家显示名。可用于
+    /// 清洗名字（如剥离富文本利用）或打上槽位前缀。
+    pub fn update_name(&self, name: &str) {
+        let c = CString::new(name).unwrap_or_default();
+        unsafe { (self.host.player_update_name)(self.id, c.as_ptr()) };
+    }
+
+    /// Trigger an animation on this player via
+    /// `PlayerControl.RpcCallAnimation` (e.g. `"Reloading"`).
+    ///
+    /// 通过 `PlayerControl.RpcCallAnimation` 在该玩家身上触发动画
+    /// （如 `"Reloading"`）。
+    pub fn call_animation(&self, anim: &str) {
+        let c = CString::new(anim).unwrap_or_default();
+        unsafe { (self.host.player_call_animation)(self.id, c.as_ptr()) };
+    }
+
+    // ── Vehicle association ─────────────────────────────────────────────────
+
+    /// The vehicle this player is currently in, or `None` when on foot.
+    /// Mirrors [`Vehicle::driver`](crate::Vehicle::driver) in the other
+    /// direction. Backed by `playerVehicle.currentVehicle` gated on
+    /// `IsInVehicle()`.
+    ///
+    /// 该玩家当前所在的载具，未乘载具时为 `None`。是
+    /// [`Vehicle::driver`](crate::Vehicle::driver) 的反方向。
+    pub fn vehicle(&self) -> Option<crate::Vehicle<'ctx>> {
+        let id = unsafe { (self.host.player_vehicle)(self.id) };
+        (id != 0).then(|| crate::Vehicle::new(id, self.host))
+    }
+
+    /// `true` if this player is currently in a vehicle.
+    ///
+    /// 该玩家当前是否在载具中。
+    pub fn is_in_vehicle(&self) -> bool {
+        unsafe { (self.host.player_vehicle)(self.id) != 0 }
+    }
+
+    // ── Raw field escape hatch ──────────────────────────────────────────────
+
+    /// Read an arbitrary `PlayerControl` field by its [`PlayerField`] id
+    /// from [`crate::fields`], typed as `i32`. Escape hatch for fields
+    /// that don't yet have a dedicated typed getter — the host still
+    /// validates the id against its offset table, returning `0` for
+    /// anything it doesn't recognise.
+    ///
+    /// 按 [`crate::fields`] 中的 [`PlayerField`] id 读取任意
+    /// `PlayerControl` 字段（按 `i32` 解释）。这是尚无专用 getter 字段的
+    /// 逃生舱——宿主仍会用偏移表校验 id，无法识别时返回 `0`。
+    ///
+    /// [`PlayerField`]: crate::fields::PlayerField
+    pub fn read_raw_i32(&self, field: crate::fields::PlayerField) -> i32 {
+        self.read_i32(field)
+    }
+
+    /// Read an arbitrary `PlayerControl` field as `f32`. See
+    /// [`read_raw_i32`](Self::read_raw_i32).
+    ///
+    /// 按 `f32` 读取任意字段。详见 [`read_raw_i32`](Self::read_raw_i32)。
+    pub fn read_raw_f32(&self, field: crate::fields::PlayerField) -> f32 {
+        self.read_f32(field)
+    }
+
+    /// Read an arbitrary `PlayerControl` field as `bool`. See
+    /// [`read_raw_i32`](Self::read_raw_i32).
+    ///
+    /// 按 `bool` 读取任意字段。详见 [`read_raw_i32`](Self::read_raw_i32)。
+    pub fn read_raw_bool(&self, field: crate::fields::PlayerField) -> bool {
+        self.read_bool(field)
+    }
+
+    /// Read an arbitrary `PlayerControl` field as a `Vec3`. See
+    /// [`read_raw_i32`](Self::read_raw_i32).
+    ///
+    /// 按 `Vec3` 读取任意字段。详见 [`read_raw_i32`](Self::read_raw_i32)。
+    pub fn read_raw_vec3(&self, field: crate::fields::PlayerField) -> [f32; 3] {
+        self.read_vec3(field)
     }
 
     // ── Generic readers (delegated via HostApi) ─────────────────────────

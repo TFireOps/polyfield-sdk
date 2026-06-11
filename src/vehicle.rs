@@ -6,7 +6,7 @@
 use crate::abi::HostApi;
 use crate::events::PlayerRef;
 use crate::game_enums::VehicleType;
-use crate::player::Player;
+use crate::player::{read_string_via, Player};
 
 /// A handle to a live `VehicleControl` instance. Constructed via
 /// `ctx.vehicle(ref)` or `evt.vehicle(ctx)`. Cannot outlive the
@@ -39,6 +39,20 @@ impl<'ctx> Vehicle<'ctx> {
     /// Vehicle type as typed enum.
     pub fn vehicle_type(&self) -> Option<VehicleType> {
         VehicleType::from_raw(self.vehicle_type_raw())
+    }
+
+    /// `VehicleControl.vehicleModel` name (e.g. `"jagdpanther"`). Empty
+    /// string if the field can't be resolved. Distinct from
+    /// [`vehicle_type`](Self::vehicle_type), which is the coarse category;
+    /// this is the specific model string the game uses.
+    ///
+    /// `VehicleControl.vehicleModel` 的名字（如 `"jagdpanther"`）。字段
+    /// 无法解析时为空串。与粗分类的 [`vehicle_type`](Self::vehicle_type)
+    /// 不同，这是游戏使用的具体模型字符串。
+    pub fn model_name(&self) -> String {
+        read_string_via(|buf, cap| unsafe {
+            (self.host.vehicle_model_name)(self.id, buf, cap)
+        })
     }
 
     /// The driver's PlayerRef. Returns 0 if no driver.

@@ -49,12 +49,14 @@ pub mod fields;
 pub mod game_enums;
 mod abi;
 mod context;
+mod math;
 mod player;
 mod plugin;
 mod vehicle;
 
 pub use abi::{HostApi, LogLevel, PluginVTable, POLYFIELD_ABI_VERSION, POLYFIELD_ENTRY_SYMBOL};
 pub use context::{Ctx, PlayerSnapshot};
+pub use math::Vec3;
 pub use player::Player;
 pub use plugin::{Plugin, PluginManifest};
 pub use vehicle::Vehicle;

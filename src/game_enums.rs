@@ -203,6 +203,21 @@ impl MatchType {
         }
     }
 
+    /// Parse from the C# enum name (`"teamMatch"` / `"conquest"`), as
+    /// returned by [`crate::Ctx::match_type`]. `None` for anything else
+    /// (including the `"unknown:N"` fallback).
+    ///
+    /// 从 C# 枚举名解析（`"teamMatch"` / `"conquest"`，即
+    /// [`crate::Ctx::match_type`] 的返回）。其它值（含 `"unknown:N"`
+    /// 回退）返回 `None`。
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "teamMatch" => Some(Self::teamMatch),
+            "conquest" => Some(Self::conquest),
+            _ => None,
+        }
+    }
+
     /// Variant name as it appears in the C# enum source.
     ///
     /// C# 源码中的变体名。
@@ -253,6 +268,115 @@ impl VehicleType {
 }
 
 impl fmt::Display for VehicleType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ── UserState ─────────────────────────────────────────────────────────────
+
+/// A player's connection / privilege state. Backs `PlayerControl.myState`.
+///
+/// 玩家的连接 / 权限状态。对应 `PlayerControl.myState`。
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UserState {
+    Client = 0,
+    Host = 1,
+    Admin = 2,
+    Kicked = 3,
+    Banned = 4,
+}
+
+impl UserState {
+    /// Convert a raw integer to the enum. Returns `None` for unknown values.
+    ///
+    /// 将原始整数转为枚举。未知值返回 `None`。
+    pub fn from_raw(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Client),
+            1 => Some(Self::Host),
+            2 => Some(Self::Admin),
+            3 => Some(Self::Kicked),
+            4 => Some(Self::Banned),
+            _ => None,
+        }
+    }
+
+    /// Variant name as it appears in the C# enum source.
+    ///
+    /// C# 源码中的变体名。
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Host => "host",
+            Self::Admin => "admin",
+            Self::Kicked => "kicked",
+            Self::Banned => "banned",
+        }
+    }
+
+    /// `true` for `admin` or `host` — i.e. an elevated user whose
+    /// privileged actions are expected rather than suspicious.
+    ///
+    /// `admin` 或 `host` 时为 `true`——即权限提升用户，其特权操作
+    /// 属预期而非可疑。
+    pub fn is_privileged(&self) -> bool {
+        matches!(self, Self::Admin | Self::Host)
+    }
+}
+
+impl fmt::Display for UserState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ── ClassRole ─────────────────────────────────────────────────────────────
+
+/// A player's selected class. Backs `PlayerControl.myClass`.
+///
+/// 玩家选择的兵种。对应 `PlayerControl.myClass`。
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClassRole {
+    Assault = 0,
+    Medic = 1,
+    Support = 2,
+    Scout = 3,
+    Tanker = 4,
+}
+
+impl ClassRole {
+    /// Convert a raw integer to the enum. Returns `None` for unknown values.
+    ///
+    /// 将原始整数转为枚举。未知值返回 `None`。
+    pub fn from_raw(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Assault),
+            1 => Some(Self::Medic),
+            2 => Some(Self::Support),
+            3 => Some(Self::Scout),
+            4 => Some(Self::Tanker),
+            _ => None,
+        }
+    }
+
+    /// Variant name as it appears in the C# enum source.
+    ///
+    /// C# 源码中的变体名。
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Assault => "assault",
+            Self::Medic => "medic",
+            Self::Support => "support",
+            Self::Scout => "scout",
+            Self::Tanker => "tanker",
+        }
+    }
+}
+
+impl fmt::Display for ClassRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }

@@ -235,4 +235,39 @@ pub trait Plugin: Send + Sync + 'static {
     fn on_vehicle_repair(&mut self, _evt: &mut VehicleRepairEvent, _ctx: &Ctx) -> bool {
         true
     }
+
+    /// An inbound command arrived from the management backend, routed to
+    /// this plugin. `name` is the command verb (e.g. `"kick"`), `args` is
+    /// the raw remainder for the plugin to parse. Return `Some(response)`
+    /// to send a reply back to the backend, or `None` for no reply.
+    /// **Notification-style** otherwise — the host doesn't act on the
+    /// return value beyond forwarding it.
+    ///
+    /// 来自管理后端、路由到本插件的入站命令。`name` 是命令动词
+    /// （如 `"kick"`），`args` 是交给插件自行解析的原始剩余串。返回
+    /// `Some(response)` 把回复发回后端，`None` 表示无回复。
+    ///
+    /// Pairs with [`Ctx::emit`](crate::Ctx::emit) for the outbound
+    /// direction. Default returns `None`.
+    ///
+    /// 与出站方向的 [`Ctx::emit`](crate::Ctx::emit) 配对。默认返回 `None`。
+    fn on_command(&mut self, _name: &str, _args: &str, _ctx: &Ctx) -> Option<String> {
+        None
+    }
+
+    /// A one-shot timer previously armed via
+    /// [`Ctx::schedule_once`](crate::Ctx::schedule_once) fired. `token` is
+    /// whatever value you passed when arming it — match on it to dispatch.
+    /// **Notification only.**
+    ///
+    /// 此前通过 [`Ctx::schedule_once`](crate::Ctx::schedule_once) 注册的
+    /// 一次性定时器触发。`token` 是注册时传入的值——据此分发。**仅通知。**
+    ///
+    /// Use this for deferred actions a single `on_tick` cadence can't
+    /// express, e.g. "warn now, re-check in 3s": arm a timer in the hook,
+    /// act when it fires.
+    ///
+    /// 用于单一 `on_tick` 节奏表达不了的延后动作，例如「现在警告，
+    /// 3 秒后复查」：在 hook 里注册定时器，触发时再动作。
+    fn on_timer(&mut self, _token: u64, _ctx: &Ctx) {}
 }

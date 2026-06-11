@@ -166,8 +166,14 @@ impl DamageEvent {
     /// Typed weapon id (primary/secondary firearms). `None` if unknown.
     ///
     /// 带类型的武器 ID（主/副武器）。未知时返回 `None`。
-    pub fn weapon_enum(&self) -> Option<WeaponId> {
+    pub fn weapon(&self) -> Option<WeaponId> {
         WeaponId::from_raw(self.weapon_id)
+    }
+
+    /// Deprecated alias for [`weapon`](Self::weapon).
+    #[deprecated(note = "renamed to weapon() for consistency with Player::weapon()")]
+    pub fn weapon_enum(&self) -> Option<WeaponId> {
+        self.weapon()
     }
 
     /// Typed gadget id (equipment slot). `None` if unknown.
@@ -368,8 +374,14 @@ impl ShootEvent {
     }
 
     /// Typed weapon id (primary/secondary firearms). `None` if unknown.
-    pub fn weapon_enum(&self) -> Option<WeaponId> {
+    pub fn weapon(&self) -> Option<WeaponId> {
         WeaponId::from_raw(self.weapon_type as i32)
+    }
+
+    /// Deprecated alias for [`weapon`](Self::weapon).
+    #[deprecated(note = "renamed to weapon() for consistency with Player::weapon()")]
+    pub fn weapon_enum(&self) -> Option<WeaponId> {
+        self.weapon()
     }
 }
 

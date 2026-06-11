@@ -13,6 +13,7 @@
 
 use crate::abi::{HostApi, LogLevel};
 use crate::events::PlayerRef;
+use crate::game_enums::MatchType;
 use crate::player::{read_string_via, Player};
 use crate::vehicle::Vehicle;
 use std::ffi::CString;
@@ -234,6 +235,15 @@ impl Ctx {
         read_string_via(|buf, cap| unsafe { (self.host.match_type)(buf, cap) })
     }
 
+    /// Current match type as a typed [`MatchType`]. `None` when the value
+    /// isn't recognised (the `"unknown:N"` case) or isn't resolvable yet.
+    ///
+    /// 当前 match type 的类型化 [`MatchType`]。值无法识别（`"unknown:N"`）
+    /// 或尚不可解析时返回 `None`。
+    pub fn match_type_enum(&self) -> Option<MatchType> {
+        MatchType::from_name(&self.match_type())
+    }
+
     /// `ServerEntityInspector.Instance.GetAnalytics()` — game-supplied
     /// analytics dump (large string, JSON-ish). Returns an empty string
     /// if the singleton isn't available.
@@ -365,5 +375,99 @@ impl Ctx {
     /// 从原始 VehicleControl 指针构造 `Vehicle` 句柄。
     pub fn vehicle(&self, id: PlayerRef) -> Vehicle<'_> {
         Vehicle::new(id, self.host)
+    }
+
+    // ── Roster (live handles) ───────────────────────────────────────────────
+
+    /// Every online player as a live [`Player`] handle.
+    ///
+    /// 所有在线玩家的实时 [`Player`] 句柄。
+    ///
+    /// Unlike [`players`](Self::players), which returns immutable
+    /// [`PlayerSnapshot`]s with a fixed field set, these handles read the
+    /// game's current state on demand and expose the full accessor +
+    /// action surface. This is what server-wide scans want — speed
+    /// checks, load-gating, per-team messaging, kd tallies.
+    ///
+    /// 与返回固定字段只读 [`PlayerSnapshot`] 的 [`players`](Self::players)
+    /// 不同，这里的句柄按需读取游戏当前状态，并暴露完整的 getter +
+    /// 动作能力。全场扫描（加速检测、加载限流、按队伍发消息、kd 统计）
+    /// 应该用它。
+    ///
+    /// Returns an empty `Vec` if the roster isn't populated yet. Handles
+    /// are bound to this `Ctx` and must not outlive the callback.
+    ///
+    /// 名单尚未填充时返回空 `Vec`。句柄绑定到当前 `Ctx`，不能在回调
+    /// 结束后继续使用。
+    pub fn all_players(&self) -> Vec<Player<'_>> {
+        let mut out: *const PlayerRef = std::ptr::null();
+        let mut len: usize = 0;
+        unsafe { (self.host.all_players)(&mut out, &mut len) };
+        if out.is_null() || len == 0 {
+            return Vec::new();
+        }
+        let refs = unsafe { std::slice::from_raw_parts(out, len) };
+        refs.iter().map(|&id| Player::new(id, self.host)).collect()
+    }
+
+    // ── Match state read/write ──────────────────────────────────────────────
+
+    /// `GameManager.Instance.currentTime` — the match countdown in
+    /// seconds. `None` if `GameManager` isn't available yet.
+    ///
+    /// `GameManager.Instance.currentTime` —— 对局倒计时（秒）。
+    /// `GameManager` 尚不可用时返回 `None`。
+    pub fn current_time(&self) -> Option<f32> {
+        let t = unsafe { (self.host.game_current_time)() };
+        (t >= 0.0).then_some(t)
+    }
+
+    /// Force the match countdown to `secs`. Setting a small value (e.g.
+    /// `10.0`) is how vote-map / admin-rotate features trigger an early
+    /// map change. No-op if `GameManager` isn't available.
+    ///
+    /// 强制把对局倒计时设为 `secs`。设一个小值（如 `10.0`）即是投票
+    /// 换图 / 管理员强制换图触发提前换图的方式。`GameManager` 不可用
+    /// 时为空操作。
+    pub fn set_current_time(&self, secs: f32) {
+        unsafe { (self.host.game_set_current_time)(secs) };
+    }
+
+    // ── Backend channel ─────────────────────────────────────────────────────
+
+    /// Emit a structured event to the management backend through the
+    /// host. `kind` is a short type tag (e.g. `"kickCheat"`, `"ban"`);
+    /// `json` is an opaque UTF-8 payload — typically serialized JSON the
+    /// host forwards verbatim. The inbound counterpart is
+    /// [`Plugin::on_command`](crate::Plugin::on_command).
+    ///
+    /// 经宿主向管理后端发送一条结构化事件。`kind` 是简短类型标签
+    /// （如 `"kickCheat"`、`"ban"`）；`json` 是宿主原样转发的 UTF-8
+    /// 透传负载（通常是序列化后的 JSON）。入站对应物是
+    /// [`Plugin::on_command`](crate::Plugin::on_command)。
+    pub fn emit(&self, kind: &str, json: &str) {
+        let k = CString::new(kind).unwrap_or_default();
+        let j = CString::new(json).unwrap_or_default();
+        unsafe { (self.host.emit)(k.as_ptr(), j.as_ptr()) };
+    }
+
+    // ── Deferred scheduling ─────────────────────────────────────────────────
+
+    /// Arm a one-shot timer. After `delay_ms`, the framework calls this
+    /// plugin's [`Plugin::on_timer`](crate::Plugin::on_timer) with
+    /// `token`. Use distinct tokens to tell timers apart.
+    ///
+    /// 注册一次性定时器。`delay_ms` 之后框架用 `token` 调用本插件的
+    /// [`Plugin::on_timer`](crate::Plugin::on_timer)。用不同 token 区分
+    /// 多个定时器。
+    ///
+    /// For *periodic* work, prefer dividing down [`Plugin::on_tick`](crate::Plugin::on_tick) by a
+    /// frame counter — this is strictly for deferred one-shots (e.g.
+    /// "re-check this player in 3 seconds"). No cancellation in v22.
+    ///
+    /// *周期性* 工作请优先用帧计数对 [`Plugin::on_tick`](crate::Plugin::on_tick) 分频——这里
+    /// 仅用于延后的一次性动作（如「3 秒后复查该玩家」）。v22 不支持取消。
+    pub fn schedule_once(&self, delay_ms: u64, token: u64) {
+        unsafe { (self.host.schedule_once)(delay_ms, token) };
     }
 }

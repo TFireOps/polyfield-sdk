@@ -19,7 +19,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 /// Bump when the vtable or any event layout changes in a way that requires
 /// recompiling plugins. The framework refuses to load plugins whose
 /// manifest reports a different value.
-pub const POLYFIELD_ABI_VERSION: u32 = 21;
+pub const POLYFIELD_ABI_VERSION: u32 = 22;
 
 pub const POLYFIELD_ENTRY_SYMBOL: &[u8] = b"polyfield_plugin_entry\0";
 
@@ -140,6 +140,87 @@ pub struct HostApi {
 
     /// Get all online vehicle VehicleControl pointers.
     pub vehicles: unsafe extern "C" fn(out: *mut *const PlayerRef, len: *mut usize),
+
+    // ── v22 additions ───────────────────────────────────────────────────────
+
+    /// Get every online player's `PlayerControl` ref. Same out-pointer
+    /// convention as [`vehicles`](Self::vehicles): the host fills `out`
+    /// with a pointer to its internal array and `len` with the count.
+    /// The array is owned by the host and only valid until the callback
+    /// returns — the SDK copies it into `Player` handles immediately.
+    ///
+    /// 获取所有在线玩家的 `PlayerControl` ref。与
+    /// [`vehicles`](Self::vehicles) 相同的出参约定。数组由宿主持有，
+    /// 仅在回调返回前有效——SDK 会立即拷贝成 `Player` 句柄。
+    pub all_players: unsafe extern "C" fn(out: *mut *const PlayerRef, len: *mut usize),
+
+    /// Send a chat message to a single player's client only (directed RPC
+    /// via `SendTargetRPCInternal` + a pooled writer). No-op if the
+    /// player or their connection isn't resolvable.
+    ///
+    /// 仅向单个玩家的客户端发送聊天消息（经 `SendTargetRPCInternal` +
+    /// 池化 writer 的定向 RPC）。玩家或其连接不可解析时为空操作。
+    pub player_send_chat: unsafe extern "C" fn(PlayerRef, msg: *const c_char),
+
+    /// Force a player's display name via `PlayerControl.RpcUpdateName`.
+    ///
+    /// 通过 `PlayerControl.RpcUpdateName` 强制设置玩家显示名。
+    pub player_update_name: unsafe extern "C" fn(PlayerRef, name: *const c_char),
+
+    /// Trigger an animation on a player via
+    /// `PlayerControl.RpcCallAnimation`.
+    ///
+    /// 通过 `PlayerControl.RpcCallAnimation` 在玩家身上触发动画。
+    pub player_call_animation: unsafe extern "C" fn(PlayerRef, anim: *const c_char),
+
+    /// Read the vehicle a player is currently in. Returns `0` when the
+    /// player is on foot or unresolved. Backed by
+    /// `playerVehicle.currentVehicle` gated on `IsInVehicle()`.
+    ///
+    /// 读取玩家当前所在载具。玩家未乘载具或不可解析时返回 `0`。
+    pub player_vehicle: unsafe extern "C" fn(PlayerRef) -> PlayerRef,
+
+    /// Read `VehicleControl.vehicleModel` name string.
+    /// `out_buf, cap -> required` convention.
+    ///
+    /// 读取 `VehicleControl.vehicleModel` 的模型名字符串。
+    pub vehicle_model_name:
+        unsafe extern "C" fn(vehicle: PlayerRef, out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// Read `GameManager.Instance.currentTime` (match countdown, seconds).
+    /// Returns `-1.0` if the singleton isn't available.
+    ///
+    /// 读取 `GameManager.Instance.currentTime`（对局倒计时，秒）。单例
+    /// 不可用时返回 `-1.0`。
+    pub game_current_time: unsafe extern "C" fn() -> f32,
+
+    /// Write `GameManager.Instance.currentTime`. Used to force a map
+    /// rotation countdown (e.g. set to `10` after a vote passes). No-op
+    /// if the singleton isn't available.
+    ///
+    /// 写入 `GameManager.Instance.currentTime`。用于强制换图倒计时
+    /// （如投票通过后设为 `10`）。单例不可用时为空操作。
+    pub game_set_current_time: unsafe extern "C" fn(secs: f32),
+
+    /// Emit a structured event to the host, which forwards it to the
+    /// management backend (the host's `send()` channel). `kind` and
+    /// `json` are both null-terminated; `json` is an opaque UTF-8 payload
+    /// the host does not parse.
+    ///
+    /// 向宿主发送一条结构化事件，由宿主转发给管理后端（宿主的
+    /// `send()` 通道）。`kind` 与 `json` 均以 NUL 结尾；`json` 是宿主
+    /// 不解析的 UTF-8 透传负载。
+    pub emit: unsafe extern "C" fn(kind: *const c_char, json: *const c_char),
+
+    /// Register a one-shot timer. After `delay_ms`, the host calls the
+    /// plugin's `on_timer` with the given `token`. The host owns the
+    /// scheduling; the plugin matches on `token` to know which timer
+    /// fired. No cancellation in v22 — keep tokens meaningful.
+    ///
+    /// 注册一次性定时器。`delay_ms` 之后宿主用给定 `token` 调用插件的
+    /// `on_timer`。调度由宿主负责；插件靠 `token` 区分是哪个定时器。
+    /// v22 不支持取消——`token` 请取得有意义。
+    pub schedule_once: unsafe extern "C" fn(delay_ms: u64, token: u64),
 }
 
 #[doc(hidden)]
@@ -177,6 +258,35 @@ pub struct PluginVTable {
     /// Interceptable: returns `true` to forward, `false` to skip.
     pub on_vehicle_repair:
         unsafe extern "C" fn(*mut (), *mut VehicleRepairEvent, &'static HostApi) -> bool,
+
+    // ── v22 additions ───────────────────────────────────────────────────────
+
+    /// Inbound command from the management backend. `name` and `args`
+    /// (a single string the plugin parses) are null-terminated. The
+    /// plugin writes an optional UTF-8 response into `out_buf` using the
+    /// `out_buf, cap -> required` convention and returns the required
+    /// length (0 = no response). The host routes a command to whichever
+    /// plugin claims it.
+    ///
+    /// 来自管理后端的入站命令。`name` 与 `args`（由插件自行解析的单个
+    /// 字符串）以 NUL 结尾。插件用 `out_buf, cap -> required` 约定向
+    /// `out_buf` 写入可选的 UTF-8 响应并返回所需长度（0 = 无响应）。
+    pub on_command: unsafe extern "C" fn(
+        *mut (),
+        name: *const c_char,
+        args: *const c_char,
+        out_buf: *mut c_char,
+        cap: usize,
+        &'static HostApi,
+    ) -> usize,
+
+    /// A previously scheduled one-shot timer fired. `token` is the value
+    /// the plugin passed to [`HostApi::schedule_once`]. Notification only.
+    ///
+    /// 此前注册的一次性定时器触发。`token` 是插件传给
+    /// [`HostApi::schedule_once`] 的值。仅通知。
+    pub on_timer: unsafe extern "C" fn(*mut (), token: u64, &'static HostApi),
+
     pub drop: unsafe extern "C" fn(*mut ()),
 }
 
@@ -219,6 +329,8 @@ pub fn __build_vtable<P: Plugin>(plugin: P) -> PluginVTable {
         on_reload,
         on_vehicle_shoot,
         on_vehicle_repair,
+        on_command,
+        on_timer,
         drop: drop_cell,
     }
 }
@@ -236,6 +348,33 @@ unsafe fn report_panic(host: &HostApi, plugin: &str, hook: &str) {
     let m = CString::new(format!("panicked in {hook} (caught — not propagated)"))
         .unwrap_or_default();
     (host.log)(LogLevel::Error, p.as_ptr(), m.as_ptr());
+}
+
+/// Borrow an incoming null-terminated C string as an owned `String`,
+/// lossily decoding UTF-8. A null pointer yields an empty string. Used
+/// for host→plugin string params (e.g. `on_command`).
+unsafe fn cstr_borrow(p: *const c_char) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+}
+
+/// Write `bytes` into the host-provided `out_buf` following the
+/// `out_buf, cap -> required` convention shared by every string-returning
+/// API. Always returns the number of bytes the caller *would* need
+/// (excluding NUL) so the host can re-call with a bigger buffer; only
+/// copies what fits. A NUL terminator is written when there's room.
+unsafe fn write_out(bytes: &[u8], out_buf: *mut c_char, cap: usize) -> usize {
+    let required = bytes.len();
+    if out_buf.is_null() || cap == 0 {
+        return required;
+    }
+    // Reserve one byte for the NUL terminator.
+    let copy = required.min(cap - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf as *mut u8, copy);
+    *out_buf.add(copy) = 0;
+    required
 }
 
 /// Run a notification-style hook body, swallowing any panic. A panicking
@@ -374,6 +513,39 @@ unsafe extern "C" fn on_vehicle_repair(
     guard_intercept(host, c.name, "on_vehicle_repair", || {
         c.plugin.on_vehicle_repair(&mut *evt, &Ctx::new(host, c.name))
     })
+}
+unsafe extern "C" fn on_command(
+    state: *mut (),
+    name: *const c_char,
+    args: *const c_char,
+    out_buf: *mut c_char,
+    cap: usize,
+    host: &'static HostApi,
+) -> usize {
+    let c = with_cell(state);
+    // Borrow the C strings without taking ownership; lossy UTF-8 so a
+    // malformed payload can't crash the boundary.
+    let name_s = cstr_borrow(name);
+    let args_s = cstr_borrow(args);
+    let resp = match catch_unwind(AssertUnwindSafe(|| {
+        c.plugin.on_command(&name_s, &args_s, &Ctx::new(host, c.name))
+    })) {
+        Ok(r) => r,
+        Err(_) => {
+            report_panic(host, c.name, "on_command");
+            None
+        }
+    };
+    match resp {
+        Some(s) => write_out(s.as_bytes(), out_buf, cap),
+        None => 0,
+    }
+}
+unsafe extern "C" fn on_timer(state: *mut (), token: u64, host: &'static HostApi) {
+    let c = with_cell(state);
+    guard_notify(host, c.name, "on_timer", || {
+        c.plugin.on_timer(token, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn drop_cell(state: *mut ()) {
     drop(Box::from_raw(state as *mut Cell));

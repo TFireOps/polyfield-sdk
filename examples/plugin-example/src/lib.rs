@@ -78,7 +78,7 @@ impl Plugin for Example {
                 victim,
                 evt.amount,
                 evt.damage_type_enum(),
-                evt.weapon_enum(),
+                evt.weapon(),
                 evt.is_npc,
                 evt.data,
             )
@@ -146,7 +146,7 @@ impl Plugin for Example {
                 format!(
                     "[on_shoot] caller=<unresolved> weapon_type={} weapon={:?} shoot_data={:?}",
                     evt.weapon_type,
-                    evt.weapon_enum(),
+                    evt.weapon(),
                     evt.shoot_data,
                 )
                 .as_str(),
@@ -160,7 +160,7 @@ impl Plugin for Example {
                 p.name(),
                 p.player_id(),
                 evt.weapon_type,
-                evt.weapon_enum(),
+                evt.weapon(),
                 evt.shoot_data,
             )
             .as_str(),
@@ -231,21 +231,40 @@ impl Plugin for Example {
     fn on_tick(&mut self, evt: &TickEvent, ctx: &Ctx) {
         // 5s = 100 ticks (50ms each)
         if evt.frame % 100 == 0 {
-            let players = ctx.players();
-            let names: Vec<String> = players
+            // Live handles (not snapshots): read team / speed on demand.
+            let players = ctx.all_players();
+            let lines: Vec<String> = players
                 .iter()
-                .map(|s| ctx.player(s.id).name())
+                .map(|p| format!("{}({}) spd2d={:.1}", p.name(), p.player_id(), p.vel().magnitude_2d()))
                 .collect();
             ctx.log_info(
-                format!(
-                    "[players] count={} names={:?}",
-                    players.len(),
-                    names,
-                )
-                .as_str(),
+                format!("[all_players] count={} {:?}", players.len(), lines).as_str(),
             );
         }
     }
+
+    fn on_command(&mut self, name: &str, args: &str, ctx: &Ctx) -> Option<String> {
+        ctx.log_info(format!("[on_command] name={name:?} args={args:?}").as_str());
+        match name {
+            // Echo back a reply the backend can read.
+            "ping" => Some("pong".to_string()),
+            // Demonstrate deferred action: arm a one-shot timer.
+            "delayed-say" => {
+                ctx.schedule_once(3000, TOKEN_DELAYED_SAY);
+                Some("scheduled in 3s".to_string())
+            }
+            _ => None,
+        }
+    }
+
+    fn on_timer(&mut self, token: u64, ctx: &Ctx) {
+        if token == TOKEN_DELAYED_SAY {
+            ctx.host_say(&polyfield::color("green", "delayed-say fired"));
+        }
+    }
 }
+
+/// Token used to tag our one-shot timer in `on_timer`.
+const TOKEN_DELAYED_SAY: u64 = 1;
 
 declare_plugin!(Example::new());

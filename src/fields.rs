@@ -57,7 +57,7 @@ pub const F_PING_WARN: PlayerField = 0x0209;        // int
 pub const F_TEAMKILL_WARN: PlayerField = 0x020A;    // int
 
 // Movement / pose
-pub const F_PLAYER_SPEED: PlayerField = 0x0300;     // float
+pub const F_PLAYER_SPEED: PlayerField = 0x0300;     // float (configured move-speed CONSTANT, not live velocity — use F_NET_VELOCITY)
 pub const F_RUNNING: PlayerField = 0x0301;          // bool
 pub const F_GROUNDED: PlayerField = 0x0302;         // bool
 pub const F_CROUCH: PlayerField = 0x0303;           // int
