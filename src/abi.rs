@@ -155,12 +155,15 @@ pub struct HostApi {
     pub all_players: unsafe extern "C" fn(out: *mut *const PlayerRef, len: *mut usize),
 
     /// Send a chat message to a single player's client only (directed RPC
-    /// via `SendTargetRPCInternal` + a pooled writer). No-op if the
-    /// player or their connection isn't resolvable.
+    /// Send a chat message to a specific player (true private message).
+    /// Uses Mirror's `SendTargetRPCInternal` to deliver `RpcSendChat` only
+    /// to the target player's client. No-op if sender, target, or their
+    /// connections aren't resolvable.
     ///
-    /// 仅向单个玩家的客户端发送聊天消息（经 `SendTargetRPCInternal` +
-    /// 池化 writer 的定向 RPC）。玩家或其连接不可解析时为空操作。
-    pub player_send_chat: unsafe extern "C" fn(PlayerRef, msg: *const c_char),
+    /// 向指定玩家发送聊天消息（真正的私聊）。通过 Mirror 的
+    /// `SendTargetRPCInternal` 将 `RpcSendChat` 只投递给目标玩家的客户端。
+    /// sender、target 或其连接不可解析时为空操作。
+    pub player_send_chat: unsafe extern "C" fn(sender: PlayerRef, target: PlayerRef, msg: *const c_char),
 
     /// Force a player's display name via `PlayerControl.RpcUpdateName`.
     ///

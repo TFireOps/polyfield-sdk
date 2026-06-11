@@ -98,6 +98,16 @@ impl Plugin for Example {
             )
             .as_str(),
         );
+
+        // 测试私聊：玩家发送 /test，服务器私聊回复"收到"
+        if evt.message.trim() == "/test" {
+            if let Some(host) = ctx.host_player() {
+                sender.send_chat_from(host, "收到");
+                ctx.log_info(&format!("[private_chat_test] replied to {}", sender.name()));
+            }
+            return false; // 吞掉命令，不广播
+        }
+
         true
     }
 

@@ -473,17 +473,17 @@ impl<'ctx> Player<'ctx> {
         self.kick_me(delay_secs);
     }
 
-    /// Send a chat message visible to **only this player's client**
-    /// (directed RPC). For a server-wide broadcast use
-    /// [`Ctx::host_say`](crate::Ctx::host_say). Use [`color`](crate::color)
-    /// to colourise.
+    /// Send a private chat message from `sender` to this player only.
+    /// Uses Mirror's targeted RPC — only this player's client receives it.
+    /// For server-wide broadcast use [`Ctx::host_say`](crate::Ctx::host_say).
+    /// Use [`color`](crate::color) to colourise.
     ///
-    /// 仅向**该玩家自己的客户端**发送聊天消息（定向 RPC）。全服广播
-    /// 用 [`Ctx::host_say`](crate::Ctx::host_say)。染色用
+    /// 从 `sender` 向**该玩家**发送私聊消息（定向 RPC，只有该玩家客户端
+    /// 收到）。全服广播用 [`Ctx::host_say`](crate::Ctx::host_say)。染色用
     /// [`color`](crate::color)。
-    pub fn send_chat_to(&self, msg: &str) {
+    pub fn send_chat_from(&self, sender: Player, msg: &str) {
         let c = CString::new(msg).unwrap_or_default();
-        unsafe { (self.host.player_send_chat)(self.id, c.as_ptr()) };
+        unsafe { (self.host.player_send_chat)(sender.id, self.id, c.as_ptr()) };
     }
 
     /// Force this player's display name via
