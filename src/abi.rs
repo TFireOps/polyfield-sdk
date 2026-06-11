@@ -13,12 +13,13 @@ use crate::events::{
 };
 use crate::fields::PlayerField;
 use crate::plugin::{Plugin, PluginManifest};
-use std::ffi::c_char;
+use std::ffi::{c_char, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Bump when the vtable or any event layout changes in a way that requires
 /// recompiling plugins. The framework refuses to load plugins whose
 /// manifest reports a different value.
-pub const POLYFIELD_ABI_VERSION: u32 = 20;
+pub const POLYFIELD_ABI_VERSION: u32 = 21;
 
 pub const POLYFIELD_ENTRY_SYMBOL: &[u8] = b"polyfield_plugin_entry\0";
 
@@ -30,6 +31,15 @@ pub enum LogLevel {
     Error = 2,
 }
 
+/// ABI-internal. Exposed only because [`crate::declare_plugin!`] expands
+/// to a function that names it. Plugin authors never construct or call
+/// through this directly — use the [`crate::Ctx`] / [`crate::Player`]
+/// wrappers, which uphold the safety invariants this raw vtable does not.
+///
+/// ABI 内部类型，仅因 [`crate::declare_plugin!`] 展开会用到它而公开。
+/// 插件作者不应直接构造或调用——请用 [`crate::Ctx`] / [`crate::Player`]
+/// 封装，它们维护了这个裸 vtable 不保证的安全不变量。
+#[doc(hidden)]
 #[repr(C)]
 pub struct HostApi {
     pub log: unsafe extern "C" fn(LogLevel, plugin: *const c_char, msg: *const c_char),
@@ -132,14 +142,16 @@ pub struct HostApi {
     pub vehicles: unsafe extern "C" fn(out: *mut *const PlayerRef, len: *mut usize),
 }
 
+#[doc(hidden)]
 #[repr(C)]
 pub struct PluginVTable {
     pub manifest: &'static PluginManifest,
     pub state: *mut (),
     pub on_load: unsafe extern "C" fn(*mut (), &'static HostApi),
     pub on_unload: unsafe extern "C" fn(*mut (), &'static HostApi),
-    /// Interceptable: returns `true` to forward, `false` to skip the original RPC.
-    pub on_player_join: unsafe extern "C" fn(*mut (), *mut PlayerJoinEvent, &'static HostApi) -> bool,
+    /// Notification — fires on first sighting / rename. Not interceptable
+    /// (the name broadcast can't be blocked).
+    pub on_player_join: unsafe extern "C" fn(*mut (), *const PlayerJoinEvent, &'static HostApi),
     /// Interceptable: returns `true` to forward, `false` to skip the original RPC.
     pub on_damage: unsafe extern "C" fn(*mut (), *mut DamageEvent, &'static HostApi) -> bool,
     pub on_latency: unsafe extern "C" fn(*mut (), *const LatencySample, &'static HostApi),
@@ -216,41 +228,96 @@ unsafe fn with_cell<'a>(state: *mut ()) -> &'a mut Cell {
     &mut *(state as *mut Cell)
 }
 
+/// Report a caught plugin panic through the host logger. Best-effort: if
+/// the message itself can't be turned into a C string we just drop it.
+/// Crucially this never re-panics, so the FFI boundary stays sound.
+unsafe fn report_panic(host: &HostApi, plugin: &str, hook: &str) {
+    let p = CString::new(plugin).unwrap_or_default();
+    let m = CString::new(format!("panicked in {hook} (caught — not propagated)"))
+        .unwrap_or_default();
+    (host.log)(LogLevel::Error, p.as_ptr(), m.as_ptr());
+}
+
+/// Run a notification-style hook body, swallowing any panic. A panicking
+/// plugin must never unwind across this `extern "C"` boundary (UB) nor
+/// take down the game process.
+#[inline]
+unsafe fn guard_notify(host: &'static HostApi, name: &str, hook: &str, body: impl FnOnce()) {
+    if catch_unwind(AssertUnwindSafe(body)).is_err() {
+        report_panic(host, name, hook);
+    }
+}
+
+/// Run an interceptable hook body. On panic we log and **fail open**
+/// (return `true` = forward the original call) — blocking a game call
+/// because a plugin crashed would be worse than letting it through.
+#[inline]
+unsafe fn guard_intercept(
+    host: &'static HostApi,
+    name: &str,
+    hook: &str,
+    body: impl FnOnce() -> bool,
+) -> bool {
+    match catch_unwind(AssertUnwindSafe(body)) {
+        Ok(v) => v,
+        Err(_) => {
+            report_panic(host, name, hook);
+            true
+        }
+    }
+}
+
 unsafe extern "C" fn on_load(state: *mut (), host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_load(&Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_load", || {
+        c.plugin.on_load(&Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_unload(state: *mut (), host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_unload(&Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_unload", || {
+        c.plugin.on_unload(&Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_player_join(
     state: *mut (),
-    evt: *mut PlayerJoinEvent,
+    evt: *const PlayerJoinEvent,
     host: &'static HostApi,
-) -> bool {
+) {
     let c = with_cell(state);
-    c.plugin.on_player_join(&mut *evt, &Ctx::new(host, c.name))
+    guard_notify(host, c.name, "on_player_join", || {
+        c.plugin.on_player_join(&*evt, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_damage(state: *mut (), evt: *mut DamageEvent, host: &'static HostApi) -> bool {
     let c = with_cell(state);
-    c.plugin.on_damage(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_damage", || {
+        c.plugin.on_damage(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_latency(state: *mut (), evt: *const LatencySample, host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_latency(&*evt, &Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_latency", || {
+        c.plugin.on_latency(&*evt, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_tick(state: *mut (), evt: *const TickEvent, host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_tick(&*evt, &Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_tick", || {
+        c.plugin.on_tick(&*evt, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_chat(state: *mut (), evt: *mut ChatEvent, host: &'static HostApi) -> bool {
     let c = with_cell(state);
-    c.plugin.on_chat(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_chat", || {
+        c.plugin.on_chat(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_game_start(state: *mut (), evt: *const GameStartEvent, host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_game_start(&*evt, &Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_game_start", || {
+        c.plugin.on_game_start(&*evt, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_respawn(
     state: *mut (),
@@ -258,7 +325,9 @@ unsafe extern "C" fn on_respawn(
     host: &'static HostApi,
 ) -> bool {
     let c = with_cell(state);
-    c.plugin.on_respawn(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_respawn", || {
+        c.plugin.on_respawn(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_grenade(
     state: *mut (),
@@ -266,7 +335,9 @@ unsafe extern "C" fn on_grenade(
     host: &'static HostApi,
 ) -> bool {
     let c = with_cell(state);
-    c.plugin.on_grenade(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_grenade", || {
+        c.plugin.on_grenade(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_shoot(
     state: *mut (),
@@ -274,11 +345,15 @@ unsafe extern "C" fn on_shoot(
     host: &'static HostApi,
 ) -> bool {
     let c = with_cell(state);
-    c.plugin.on_shoot(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_shoot", || {
+        c.plugin.on_shoot(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_reload(state: *mut (), evt: *const ReloadEvent, host: &'static HostApi) {
     let c = with_cell(state);
-    c.plugin.on_reload(&*evt, &Ctx::new(host, c.name));
+    guard_notify(host, c.name, "on_reload", || {
+        c.plugin.on_reload(&*evt, &Ctx::new(host, c.name))
+    });
 }
 unsafe extern "C" fn on_vehicle_shoot(
     state: *mut (),
@@ -286,7 +361,9 @@ unsafe extern "C" fn on_vehicle_shoot(
     host: &'static HostApi,
 ) -> bool {
     let c = with_cell(state);
-    c.plugin.on_vehicle_shoot(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_vehicle_shoot", || {
+        c.plugin.on_vehicle_shoot(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn on_vehicle_repair(
     state: *mut (),
@@ -294,7 +371,9 @@ unsafe extern "C" fn on_vehicle_repair(
     host: &'static HostApi,
 ) -> bool {
     let c = with_cell(state);
-    c.plugin.on_vehicle_repair(&mut *evt, &Ctx::new(host, c.name))
+    guard_intercept(host, c.name, "on_vehicle_repair", || {
+        c.plugin.on_vehicle_repair(&mut *evt, &Ctx::new(host, c.name))
+    })
 }
 unsafe extern "C" fn drop_cell(state: *mut ()) {
     drop(Box::from_raw(state as *mut Cell));

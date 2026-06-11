@@ -50,7 +50,7 @@ impl Plugin for Example {
         );
     }
 
-    fn on_player_join(&mut self, evt: &mut PlayerJoinEvent, ctx: &Ctx) -> bool {
+    fn on_player_join(&mut self, evt: &PlayerJoinEvent, ctx: &Ctx) {
         let p = evt.player(ctx);
         ctx.log_info(
             format!(
@@ -62,7 +62,6 @@ impl Plugin for Example {
             )
             .as_str(),
         );
-        true
     }
 
     fn on_damage(&mut self, evt: &mut DamageEvent, ctx: &Ctx) -> bool {

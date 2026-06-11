@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::context::Ctx;
-use crate::game_enums::{DamageType, GadgetId, VehicleType, WeaponId};
+use crate::game_enums::{DamageType, GadgetId, WeaponId};
 use crate::player::Player;
 use crate::vehicle::Vehicle;
 /// Opaque reference to a player instance.
@@ -34,9 +34,11 @@ use crate::vehicle::Vehicle;
 pub type PlayerRef = u64;
 
 /// Fired the first time the framework sees a given player, and again when
-/// that player renames themselves.
+/// that player renames themselves. **Notification only** — observing a
+/// join cannot block the name broadcast.
 ///
-/// 首次观测到某位玩家时触发；玩家改名时再次触发。
+/// 首次观测到某位玩家时触发；玩家改名时再次触发。**仅通知**——
+/// 观测加入无法阻止名字广播。
 ///
 /// Source: hooks `PlayerControl.RpcUpdateName(System.String)`. Mirror
 /// broadcasts that RPC to every client on join and on rename; the
@@ -79,7 +81,7 @@ impl PlayerJoinEvent {
 /// **攻击者**；`_target` 是受害者的 `PlayerControl` 实例指针（目标为
 /// NPC / 非玩家时为 0）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct  DamageEvent {
+pub struct DamageEvent {
     /// The player who initiated the damage (the `this` of the RPC).
     /// `0` when the damage came from a non-player source (e.g. grenade
     /// explosion arbitration, server-side artillery) — guard with
@@ -90,15 +92,17 @@ pub struct  DamageEvent {
     /// `attacker != 0` 是否为真实玩家。
     pub attacker: PlayerRef,
 
-    /// The target's Mirror netId. `0` when the target is an NPC or
-    /// couldn't be resolved. **Not** a `PlayerControl` pointer — to get
-    /// a `Player` handle, call [`Self::victim`] which performs the
-    /// netId → player lookup for you.
+    /// The target's **slot id** — the integer N behind the `Player<N>`
+    /// GameObject name (the RPC's `_target` argument). `0` when the
+    /// target is an NPC or wasn't a player. This is **not** a
+    /// `PlayerControl` pointer; call [`Self::victim`] to resolve it to a
+    /// [`Player`] handle via `PlayersManager.GetPlayer`.
     ///
-    /// 目标的 Mirror netId。目标为 NPC 或无法解析时为 `0`。**不是**
-    /// `PlayerControl` 指针——需要 `Player` 句柄请用 [`Self::victim`]，
-    /// 它会做 netId 到 PlayerControl 的查找。
-    pub victim: PlayerRef,
+    /// 目标的**槽位 id**——`Player<N>` GameObject 名里的整数 N（RPC 的
+    /// `_target` 参数）。目标为 NPC 或非玩家时为 `0`。这**不是**
+    /// `PlayerControl` 指针；用 [`Self::victim`] 通过
+    /// `PlayersManager.GetPlayer` 解析为 [`Player`] 句柄。
+    pub victim_slot: u32,
 
     /// Damage amount (integer in the game's RPC signature).
     ///
@@ -137,11 +141,19 @@ impl DamageEvent {
         ctx.player(self.attacker)
     }
 
-    /// Build a [`Player`] handle for the victim. Returns `None` when
-    /// the target is an NPC, unknown (`victim == 0`), or its netId
-    /// can't be resolved to a `PlayerControl`.
-    pub fn victim<'c>(&self, _ctx: &'c Ctx) -> Option<Player<'c>> {
-        None
+    /// Resolve the victim to a [`Player`] handle via
+    /// `PlayersManager.GetPlayer("Player<slot>")`. Returns `None` when
+    /// the target is an NPC, unknown (`victim_slot == 0`), or the slot
+    /// doesn't map to a live player.
+    ///
+    /// 通过 `PlayersManager.GetPlayer("Player<slot>")` 把受害者解析为
+    /// [`Player`] 句柄。目标为 NPC、未知（`victim_slot == 0`）或槽位
+    /// 查不到对应玩家时返回 `None`。
+    pub fn victim<'c>(&self, ctx: &'c Ctx) -> Option<Player<'c>> {
+        if self.victim_slot == 0 {
+            return None;
+        }
+        ctx.player_by_id(self.victim_slot)
     }
 
     /// Typed damage type. `None` if the game sent an unknown value.

@@ -86,7 +86,7 @@ pub struct PluginManifest {
 ///     }
 /// }
 ///
-/// declare_plugin!(Greeter::default);
+/// declare_plugin!(Greeter::default());
 /// ```
 pub trait Plugin: Send + Sync + 'static {
     /// Return a reference to this plugin's static manifest. The returned
@@ -116,19 +116,17 @@ pub trait Plugin: Send + Sync + 'static {
     fn on_unload(&mut self, _ctx: &Ctx) {}
 
     /// A player was seen for the first time, or renamed.
-    /// **Interceptable.** See [`PlayerJoinEvent`] for dedup semantics.
+    /// **Notification only.** See [`PlayerJoinEvent`] for dedup semantics.
     ///
-    /// 首次观测到某玩家或玩家改名时触发。**可拦截。** 去重细节见
+    /// 首次观测到某玩家或玩家改名时触发。**仅通知。** 去重细节见
     /// [`PlayerJoinEvent`]。
     ///
-    /// Return `true` to forward (with possibly modified `evt.name`),
-    /// `false` to skip the original RPC. Default: `true`.
+    /// Observe-only: the name broadcast can't be blocked, so this hook
+    /// takes `&PlayerJoinEvent` and returns nothing.
     ///
-    /// 返回 `true` 放行（可使用修改过的 `evt.name`），返回 `false`
-    /// 阻止原始 RPC。默认 `true`。
-    fn on_player_join(&mut self, _evt: &mut PlayerJoinEvent, _ctx: &Ctx) -> bool {
-        true
-    }
+    /// 仅观测：名字广播无法阻止，因此该回调接收 `&PlayerJoinEvent`
+    /// 且无返回值。
+    fn on_player_join(&mut self, _evt: &PlayerJoinEvent, _ctx: &Ctx) {}
 
     /// A player dealt damage. **Interceptable.** See [`DamageEvent`].
     ///

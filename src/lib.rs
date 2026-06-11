@@ -34,7 +34,7 @@
 //!     }
 //! }
 //!
-//! declare_plugin!(Greeter::default);
+//! declare_plugin!(Greeter::default());
 //! ```
 //!
 //! # What to read next / 继续阅读

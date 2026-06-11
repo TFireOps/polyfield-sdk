@@ -265,41 +265,83 @@ impl Ctx {
 
     // ── Shared KV store ────────────────────────────────────────────────────
 
-    /// Store a value in the framework's shared KV store. All plugins
-    /// share the same namespace — use a prefix like `"myplugin:"` to
-    /// avoid collisions.
+    /// Store a value in the framework's shared KV store.
     ///
-    /// 向框架的共享 KV 存储写入一个值。所有插件共享同一命名空间——
-    /// 建议用 `"myplugin:"` 前缀避免冲突。
+    /// 向框架的共享 KV 存储写入一个值。
+    ///
+    /// Keys are **automatically namespaced** with this plugin's name, so
+    /// `kv_set("count", ...)` from plugin `foo` writes `foo:count`. Other
+    /// plugins cannot read or clobber it via the same short key. Use
+    /// [`kv_set_global`](Self::kv_set_global) for a deliberately shared key.
+    ///
+    /// key 会**自动加上本插件名作为命名空间**：插件 `foo` 调用
+    /// `kv_set("count", ...)` 实际写入 `foo:count`，其它插件用同样的短
+    /// key 既读不到也覆盖不了。需要刻意共享时用
+    /// [`kv_set_global`](Self::kv_set_global)。
     pub fn kv_set(&self, key: &str, value: &str) {
+        self.kv_set_global(&self.namespaced(key), value);
+    }
+
+    /// Read a value previously written by **this plugin** via
+    /// [`kv_set`](Self::kv_set). Returns `None` if the key doesn't exist.
+    ///
+    /// 读取**本插件**通过 [`kv_set`](Self::kv_set) 写入的值。key 不存在
+    /// 时返回 `None`。
+    pub fn kv_get(&self, key: &str) -> Option<String> {
+        self.kv_get_global(&self.namespaced(key))
+    }
+
+    /// Store a value under a **shared, un-namespaced** key visible to all
+    /// plugins. Use this only for deliberate cross-plugin coordination;
+    /// prefer [`kv_set`](Self::kv_set) for plugin-private state.
+    ///
+    /// 写入一个**全局共享、不加命名空间**的 key，所有插件都能看到。
+    /// 仅用于有意的跨插件协作；插件私有状态请优先用
+    /// [`kv_set`](Self::kv_set)。
+    pub fn kv_set_global(&self, key: &str, value: &str) {
         let k = CString::new(key).unwrap_or_default();
         let v = CString::new(value).unwrap_or_default();
         unsafe { (self.host.kv_set)(k.as_ptr(), v.as_ptr()) };
     }
 
-    /// Read a value from the shared KV store. Returns `None` if the key
-    /// doesn't exist.
+    /// Read a value from the shared, un-namespaced KV space. Returns
+    /// `None` if the key doesn't exist.
     ///
-    /// 从共享 KV 存储读取一个值。key 不存在时返回 `None`。
-    pub fn kv_get(&self, key: &str) -> Option<String> {
+    /// 从全局共享(不加命名空间)的 KV 空间读取一个值。key 不存在时
+    /// 返回 `None`。
+    pub fn kv_get_global(&self, key: &str) -> Option<String> {
         let k = CString::new(key).unwrap_or_default();
         let s = read_string_via(|buf, cap| unsafe { (self.host.kv_get)(k.as_ptr(), buf, cap) });
         if s.is_empty() { None } else { Some(s) }
     }
 
+    #[inline]
+    fn namespaced(&self, key: &str) -> String {
+        format!("{}:{}", self.plugin_name, key)
+    }
+
     // ── Vehicle field readers ──────────────────────────────────────────────
 
     /// Read `VehicleControl.health`.
+    ///
+    /// Prefer the [`Vehicle`] handle: `ctx.vehicle(id).health()`.
+    #[deprecated(note = "use ctx.vehicle(id).health()")]
     pub fn vehicle_health(&self, vehicle: PlayerRef) -> i32 {
         unsafe { (self.host.vehicle_health)(vehicle) }
     }
 
     /// Read `VehicleControl.vehicleType` as raw i32.
+    ///
+    /// Prefer the [`Vehicle`] handle: `ctx.vehicle(id).vehicle_type()`.
+    #[deprecated(note = "use ctx.vehicle(id).vehicle_type()")]
     pub fn vehicle_type(&self, vehicle: PlayerRef) -> i32 {
         unsafe { (self.host.vehicle_type)(vehicle) }
     }
 
     /// Read `VehicleControl.myDriver` → PlayerRef. Returns 0 if no driver.
+    ///
+    /// Prefer the [`Vehicle`] handle: `ctx.vehicle(id).driver()`.
+    #[deprecated(note = "use ctx.vehicle(id).driver()")]
     pub fn vehicle_driver(&self, vehicle: PlayerRef) -> PlayerRef {
         unsafe { (self.host.vehicle_driver)(vehicle) }
     }

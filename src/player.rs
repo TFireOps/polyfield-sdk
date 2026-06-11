@@ -167,30 +167,62 @@ impl<'ctx> Player<'ctx> {
     pub fn crouch(&self) -> i32 { self.read_i32(f::F_CROUCH) }
     pub fn is_under_water(&self) -> bool { self.read_bool(f::F_IS_UNDER_WATER) }
 
-    /// World position from `_netTransform._recivedPos`.
-    /// Falls back to `lastPlayerPos` if the net transform is unavailable.
+    /// World position, with a convenience fallback: returns
+    /// `_netTransform._recivedPos`, or `lastPlayerPos` when the net
+    /// transform reads as all-zero (typically not yet replicated).
     ///
-    /// 取自 `_netTransform._recivedPos` 的世界坐标。
-    /// 若 net transform 不可用则回退到 `lastPlayerPos`。
+    /// 世界坐标，带便利回退：返回 `_netTransform._recivedPos`，当 net
+    /// transform 读出全零（通常是尚未同步）时回退到 `lastPlayerPos`。
+    ///
+    /// **Caveat for precise checks:** a player genuinely standing at the
+    /// world origin reads as all-zero and triggers the fallback. If you
+    /// need to distinguish "no data" from "really at origin" (e.g.
+    /// teleport / speed detection), use [`net_position`](Self::net_position),
+    /// which returns `None` instead of silently falling back.
+    ///
+    /// **精确判定注意：** 真站在世界原点的玩家也读出全零并触发回退。
+    /// 若需区分「无数据」与「真在原点」（如瞬移/加速检测），改用
+    /// [`net_position`](Self::net_position)，它返回 `None` 而不是静默回退。
     pub fn position(&self) -> [f32; 3] {
-        let v = self.read_vec3(f::F_NET_POSITION);
-        if v == [0.0, 0.0, 0.0] {
-            return self.read_vec3(f::F_LAST_PLAYER_POS);
-        }
-        v
+        self.net_position()
+            .unwrap_or_else(|| self.read_vec3(f::F_LAST_PLAYER_POS))
     }
 
-    /// Velocity from `_netTransform._recivedVel`.
-    /// Falls back to `myRigidVel` if the net transform is unavailable.
+    /// Raw `_netTransform._recivedPos` without any fallback. `None` when
+    /// it reads as all-zero — i.e. the net transform hasn't replicated a
+    /// position yet. Prefer this in detection logic where the difference
+    /// between "unavailable" and "at origin" matters.
     ///
-    /// 取自 `_netTransform._recivedVel` 的速度向量。
-    /// 若 net transform 不可用则回退到 `myRigidVel`。
+    /// 原始 `_netTransform._recivedPos`，不做任何回退。读出全零时返回
+    /// `None`（即 net transform 尚未同步位置）。在「不可用」与「在原点」
+    /// 有区别的检测逻辑里优先用它。
+    pub fn net_position(&self) -> Option<[f32; 3]> {
+        let v = self.read_vec3(f::F_NET_POSITION);
+        (v != [0.0, 0.0, 0.0]).then_some(v)
+    }
+
+    /// Velocity, with a convenience fallback: returns
+    /// `_netTransform._recivedVel`, or `myRigidVel` when the net
+    /// transform reads as all-zero. See [`position`](Self::position) for
+    /// the all-zero caveat; use [`net_velocity`](Self::net_velocity) for
+    /// the un-fallback'd value.
+    ///
+    /// 速度，带便利回退：返回 `_netTransform._recivedVel`，net transform
+    /// 读出全零时回退到 `myRigidVel`。全零注意事项见
+    /// [`position`](Self::position)；需要未回退值用
+    /// [`net_velocity`](Self::net_velocity)。
     pub fn velocity(&self) -> [f32; 3] {
+        self.net_velocity()
+            .unwrap_or_else(|| self.read_vec3(f::F_MY_RIGID_VEL))
+    }
+
+    /// Raw `_netTransform._recivedVel` without fallback. `None` when it
+    /// reads as all-zero.
+    ///
+    /// 原始 `_netTransform._recivedVel`，不回退。读出全零时返回 `None`。
+    pub fn net_velocity(&self) -> Option<[f32; 3]> {
         let v = self.read_vec3(f::F_NET_VELOCITY);
-        if v == [0.0, 0.0, 0.0] {
-            return self.read_vec3(f::F_MY_RIGID_VEL);
-        }
-        v
+        (v != [0.0, 0.0, 0.0]).then_some(v)
     }
 
     /// `_moveDir` — current movement direction vector.
@@ -316,6 +348,12 @@ impl<'ctx> Player<'ctx> {
     /// Kill this player. Calls `PlayerControl.RpcKillMe()`.
     ///
     /// 杀死该玩家。调用 `PlayerControl.RpcKillMe()`。
+    ///
+    /// No-op (logged) if this handle refers to the host player — the
+    /// framework refuses to kill the server's own player.
+    ///
+    /// 若该句柄指向 host 玩家则为空操作(会记日志)——框架拒绝杀死
+    /// 服务器自己的玩家。
     pub fn kill(&self) {
         unsafe { (self.host.player_kill)(self.id) };
     }
@@ -331,6 +369,10 @@ impl<'ctx> Player<'ctx> {
     /// 游戏自己的 `KickMePlz` handler 会在延迟后执行真正的断开。
     /// 配合前一个 `show_error` 时建议用一点延迟（例如 `0.5`），
     /// 让弹窗有时间渲染出来。
+    ///
+    /// No-op (logged) if this handle refers to the host player.
+    ///
+    /// 若该句柄指向 host 玩家则为空操作(会记日志)。
     pub fn kick_me(&self, delay_secs: f32) {
         unsafe { (self.host.player_kick_me)(self.id, delay_secs) };
     }
