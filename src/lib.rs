@@ -44,11 +44,11 @@
 //! - [`events`] — event payload definitions / 各事件的 payload 定义
 //! - [`manifest!`] / [`declare_plugin!`] — the two macros you need to wire it up / 接入所需的两个宏
 
+mod abi;
+mod context;
 pub mod events;
 pub mod fields;
 pub mod game_enums;
-mod abi;
-mod context;
 mod math;
 mod player;
 mod plugin;

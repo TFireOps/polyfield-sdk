@@ -50,9 +50,7 @@ impl<'ctx> Vehicle<'ctx> {
     /// 无法解析时为空串。与粗分类的 [`vehicle_type`](Self::vehicle_type)
     /// 不同，这是游戏使用的具体模型字符串。
     pub fn model_name(&self) -> String {
-        read_string_via(|buf, cap| unsafe {
-            (self.host.vehicle_model_name)(self.id, buf, cap)
-        })
+        read_string_via(|buf, cap| unsafe { (self.host.vehicle_model_name)(self.id, buf, cap) })
     }
 
     /// The driver's PlayerRef. Returns 0 if no driver.

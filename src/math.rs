@@ -96,7 +96,11 @@ impl Vec3 {
 
 impl From<[f32; 3]> for Vec3 {
     fn from(v: [f32; 3]) -> Self {
-        Self { x: v[0], y: v[1], z: v[2] }
+        Self {
+            x: v[0],
+            y: v[1],
+            z: v[2],
+        }
     }
 }
 

@@ -17,6 +17,7 @@ use crate::game_enums::MatchType;
 use crate::player::{read_string_via, Player};
 use crate::vehicle::Vehicle;
 use std::ffi::CString;
+use std::path::PathBuf;
 
 /// Read-only snapshot of a single player's state.
 ///
@@ -74,17 +75,23 @@ impl Ctx {
     ///
     /// 以 info 级别写一行日志。统一日志 `polyfield.log` 里会带上
     /// `[<插件名>]` 前缀。
-    pub fn log_info(&self, msg: &str) { self.log(LogLevel::Info, msg); }
+    pub fn log_info(&self, msg: &str) {
+        self.log(LogLevel::Info, msg);
+    }
 
     /// Log at warn level. Use for suspicious but not-yet-actioned signals.
     ///
     /// 以 warn 级别写日志。适合「可疑但还没动手」的信号。
-    pub fn log_warn(&self, msg: &str) { self.log(LogLevel::Warn, msg); }
+    pub fn log_warn(&self, msg: &str) {
+        self.log(LogLevel::Warn, msg);
+    }
 
     /// Log at error level. Use for hard violations or plugin-internal errors.
     ///
     /// 以 error 级别写日志。适合明确违规或插件内部错误。
-    pub fn log_error(&self, msg: &str) { self.log(LogLevel::Error, msg); }
+    pub fn log_error(&self, msg: &str) {
+        self.log(LogLevel::Error, msg);
+    }
 
     fn log(&self, level: LogLevel, msg: &str) {
         let plugin = CString::new(self.plugin_name).unwrap_or_default();
@@ -289,7 +296,9 @@ impl Ctx {
     /// key 既读不到也覆盖不了。需要刻意共享时用
     /// [`kv_set_global`](Self::kv_set_global)。
     pub fn kv_set(&self, key: &str, value: &str) {
-        self.kv_set_global(&self.namespaced(key), value);
+        let k = CString::new(self.namespaced(key)).unwrap_or_default();
+        let v = CString::new(value).unwrap_or_default();
+        unsafe { (self.host.kv_set)(k.as_ptr(), v.as_ptr()) };
     }
 
     /// Read a value previously written by **this plugin** via
@@ -312,6 +321,12 @@ impl Ctx {
         let k = CString::new(key).unwrap_or_default();
         let v = CString::new(value).unwrap_or_default();
         unsafe { (self.host.kv_set)(k.as_ptr(), v.as_ptr()) };
+
+        // Sidecar owner metadata lets the panel show global keys under the
+        // plugin that last wrote them without changing the HostApi ABI.
+        let owner_key = CString::new(format!("__pf_global_owner:{key}")).unwrap_or_default();
+        let owner = CString::new(self.plugin_name).unwrap_or_default();
+        unsafe { (self.host.kv_set)(owner_key.as_ptr(), owner.as_ptr()) };
     }
 
     /// Read a value from the shared, un-namespaced KV space. Returns
@@ -322,12 +337,48 @@ impl Ctx {
     pub fn kv_get_global(&self, key: &str) -> Option<String> {
         let k = CString::new(key).unwrap_or_default();
         let s = read_string_via(|buf, cap| unsafe { (self.host.kv_get)(k.as_ptr(), buf, cap) });
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     }
 
     #[inline]
     fn namespaced(&self, key: &str) -> String {
         format!("{}:{}", self.plugin_name, key)
+    }
+
+    /// Delete a key previously written by **this plugin** via
+    /// [`kv_set`](Self::kv_set).
+    ///
+    /// 删除**本插件**经 [`kv_set`](Self::kv_set) 写入的 key。
+    pub fn kv_del(&self, key: &str) {
+        self.kv_del_global(&self.namespaced(key));
+    }
+
+    /// Delete a **shared, un-namespaced** key (counterpart of
+    /// [`kv_set_global`](Self::kv_set_global)).
+    ///
+    /// 删除一个**全局共享、不加命名空间**的 key（[`kv_set_global`](Self::kv_set_global)
+    /// 的对侧）。
+    pub fn kv_del_global(&self, key: &str) {
+        let k = CString::new(key).unwrap_or_default();
+        unsafe { (self.host.kv_del)(k.as_ptr()) };
+
+        let owner_key = CString::new(format!("__pf_global_owner:{key}")).unwrap_or_default();
+        unsafe { (self.host.kv_del)(owner_key.as_ptr()) };
+    }
+
+    /// Delete every shared key whose name starts with `prefix` — bulk reset of
+    /// a key family. `prefix` is matched verbatim (no plugin namespace added),
+    /// so a plugin can clear a global family like `"pf:kicked_dev:"`.
+    ///
+    /// 删除所有以 `prefix` 开头的全局 key——批量重置一族。`prefix` 按原样匹配
+    /// （不加插件命名空间），因此可清理 `"pf:kicked_dev:"` 这类全局族。
+    pub fn kv_clear_prefix(&self, prefix: &str) {
+        let p = CString::new(prefix).unwrap_or_default();
+        unsafe { (self.host.kv_clear_prefix)(p.as_ptr()) };
     }
 
     // ── Vehicle field readers ──────────────────────────────────────────────
@@ -433,6 +484,155 @@ impl Ctx {
         unsafe { (self.host.game_set_current_time)(secs) };
     }
 
+    /// `GameManager.Instance.DAMAGE_FACTOR` — the server-wide integer damage
+    /// multiplier. Actual HP removed by a hit is `rpc_damage * damage_factor`
+    /// (see `ClientKillLogics`). Returns `1` when unavailable, so multiplying
+    /// by it is always safe.
+    ///
+    /// `GameManager.Instance.DAMAGE_FACTOR` —— 服务器全局整数伤害乘数。
+    /// 一次命中实际扣血 = `rpc 伤害 * damage_factor`（见 `ClientKillLogics`）。
+    /// 不可用时返回 `1`，乘它始终安全。
+    pub fn damage_factor(&self) -> i32 {
+        unsafe { (self.host.game_damage_factor)() }
+    }
+
+    /// `GameUtility.GetExplosionDamage(pos, dmgType, weaponID)` — 服务端按真实
+    /// 实体位置**重算一次**爆炸的多目标伤害,返回游戏原样的
+    /// `"\n名字:伤害\n..."` 字符串。炮弹/手雷/火箭筒的范围伤害由游戏编码在
+    /// 伤害 RPC 的 `_data` 里(而非 `_dmg`);插件可在 `on_damage` 里用本方法
+    /// 重算、按倍率缩放后写回 `evt.data`。`dmg_type` 为 [`crate::game_enums::DamageType`]
+    /// 原始值,`weapon_id` 对火箭筒为 GadgetModel。类/方法未解析时返回空串。
+    ///
+    /// **仅在游戏线程调用**(`on_damage` 由 RPC hook 在游戏线程触发,安全);
+    /// 它内部遍历实体并做物理射线,不可从其它线程调用。
+    pub fn explosion_damage(&self, pos: [f32; 3], dmg_type: i32, weapon_id: i32) -> String {
+        read_string_via(|buf, cap| unsafe {
+            (self.host.game_explosion_damage)(pos.as_ptr(), dmg_type, weapon_id, buf, cap)
+        })
+    }
+
+    // ── Map control ──────────────────────────────────────────────────────────
+
+    /// The server's configured **map pool** — the `match map` list from
+    /// `ServerConfig.txt` (comma-separated in the file, split for you).
+    /// Read-only; the framework never rewrites the operator's config. Empty
+    /// `Vec` if no pool is configured. This is the set of names accepted by
+    /// [`set_next_map`](Self::set_next_map).
+    ///
+    /// 服务器配置的**地图池** —— `ServerConfig.txt` 的 `match map` 列表
+    /// （文件里逗号分隔，已替你切分）。只读；框架绝不改写运营者配置。
+    /// 未配置地图池时返回空 `Vec`。这也是 [`set_next_map`](Self::set_next_map)
+    /// 接受的名字集合。
+    ///
+    /// Cheap file read; fine from `on_command` / occasional checks — don't
+    /// call it every tick.
+    ///
+    /// 轻量文件读取；适合 `on_command` / 偶尔检查——别每帧调。
+    pub fn server_maps(&self) -> Vec<String> {
+        read_string_via(|buf, cap| unsafe { (self.host.server_maps)(buf, cap) })
+            .split('\n')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Queue the map for the **next** round. `name` must be one of
+    /// [`server_maps`](Self::server_maps) — returns `false` (no change) if it
+    /// isn't. An empty `name` clears any pending override and returns `true`.
+    ///
+    /// **Set-only**: the change applies when the match next rotates (the
+    /// framework intercepts the game's per-round map assignment). To switch
+    /// immediately, pair with
+    /// [`set_current_time(0.0)`](Self::set_current_time) to force the current
+    /// match to end now. Never modifies `ServerConfig.txt` or `PlayerPrefs`,
+    /// so the operator's pool stays intact. The override is **one-shot** —
+    /// after it applies to one round, the configured pool resumes.
+    ///
+    /// 把地图排队为**下一局**。`name` 必须是 [`server_maps`](Self::server_maps)
+    /// 之一，否则返回 `false`（不改动）。`name` 为空则清除待生效覆盖并返回
+    /// `true`。
+    ///
+    /// **仅设置**：下次对局轮换时生效（框架拦截游戏每局的地图赋值）。要立即
+    /// 切换，请配合 [`set_current_time(0.0)`](Self::set_current_time) 强制结束
+    /// 当前对局。绝不修改 `ServerConfig.txt` 或 `PlayerPrefs`，运营者地图池
+    /// 保持原样。覆盖是**一次性**的——应用到一局后，配置的地图池随后恢复。
+    pub fn set_next_map(&self, name: &str) -> bool {
+        let c = CString::new(name).unwrap_or_default();
+        unsafe { (self.host.server_set_next_map)(c.as_ptr()) }
+    }
+
+    /// The map currently queued by [`set_next_map`](Self::set_next_map) for
+    /// the next round, or `None` if nothing is queued.
+    ///
+    /// 当前经 [`set_next_map`](Self::set_next_map) 排队、将在下一局生效的
+    /// 地图，无则 `None`。
+    pub fn next_map(&self) -> Option<String> {
+        let s = read_string_via(|buf, cap| unsafe { (self.host.server_next_map)(buf, cap) });
+        (!s.is_empty()).then_some(s)
+    }
+
+    // ── Server-list info (v29) ───────────────────────────────────────────────
+    //
+    // The data the game's own `ShareServer` announce uses. Exposed so a plugin
+    // can take over list-keepalive without the operator re-configuring values
+    // that already live in the game (serverLink/region/version/port/max). All
+    // degrade to empty / `None` when unresolved, so a plugin can fall back to
+    // its own config.
+
+    /// `GameManager.serverLink` — the public list-server endpoint URL. A Unity
+    /// serialized field (not in the DLL), so this is the only way a plugin can
+    /// obtain it. Empty string if unresolved.
+    ///
+    /// `GameManager.serverLink` —— 公共列表服务器的上报 URL。它是 Unity 序列化
+    /// 字段（不在 DLL 里），插件只能经此获取。未解析时返回空串。
+    pub fn server_link(&self) -> String {
+        read_string_via(|buf, cap| unsafe { (self.host.server_link)(buf, cap) })
+    }
+
+    /// Server region — `PlayerPrefs["Region"]`, or `"Unknown"`.
+    ///
+    /// 服务器区服 —— `PlayerPrefs["Region"]`，缺省 `"Unknown"`。
+    pub fn server_region(&self) -> String {
+        read_string_via(|buf, cap| unsafe { (self.host.server_region)(buf, cap) })
+    }
+
+    /// `Application.version` — the game build version string. Empty if
+    /// unresolved.
+    ///
+    /// `Application.version` —— 游戏构建版本号。未解析时返回空串。
+    pub fn game_version(&self) -> String {
+        read_string_via(|buf, cap| unsafe { (self.host.game_version)(buf, cap) })
+    }
+
+    /// Transport listen port (`KcpTransport.port`). `None` if unresolved.
+    ///
+    /// 传输层监听端口（`KcpTransport.port`）。未解析时返回 `None`。
+    pub fn server_port(&self) -> Option<u16> {
+        let p = unsafe { (self.host.server_port)() };
+        (p != 0).then_some(p)
+    }
+
+    /// `NetworkManager.singleton.maxConnections` — the server's max player
+    /// slots. `None` if unresolved.
+    ///
+    /// `NetworkManager.singleton.maxConnections` —— 服务器最大人数槽位。
+    /// 未解析时返回 `None`。
+    pub fn max_players(&self) -> Option<u32> {
+        let n = unsafe { (self.host.max_players)() };
+        (n != 0).then_some(n)
+    }
+
+    /// `NetworkManager.singleton.numPlayers` — current authenticated player
+    /// count. `None` if unresolved (fall back to `all_players().len()`); a real
+    /// count of `0` is returned as `Some(0)`.
+    ///
+    /// `NetworkManager.singleton.numPlayers` —— 当前已认证玩家数。未解析时返回
+    /// `None`（可回退 `all_players().len()`）；真实人数为 0 时返回 `Some(0)`。
+    pub fn player_count(&self) -> Option<u32> {
+        let n = unsafe { (self.host.player_count)() };
+        (n != u32::MAX).then_some(n)
+    }
+
     // ── Backend channel ─────────────────────────────────────────────────────
 
     /// Emit a structured event to the management backend through the
@@ -469,5 +669,72 @@ impl Ctx {
     /// 仅用于延后的一次性动作（如「3 秒后复查该玩家」）。v22 不支持取消。
     pub fn schedule_once(&self, delay_ms: u64, token: u64) {
         unsafe { (self.host.schedule_once)(delay_ms, token) };
+    }
+
+    // ── Per-plugin config & storage ─────────────────────────────────────────
+    //
+    // Resolved relative to the game's working directory — the same base
+    // `polyfield.toml` / `plugins/` use. The framework never reads or writes
+    // these; it only hands the plugin a namespaced path. Format and contents
+    // are entirely the plugin's own.
+    //
+    // 相对游戏工作目录解析——与 `polyfield.toml` / `plugins/` 同一基准。框架
+    // 既不读也不写这些内容，只给插件一个按插件名隔离的路径。格式与内容完全
+    // 由插件自定。
+
+    /// Path to this plugin's config file, `config/<plugin-name>.toml`.
+    /// Read-only by convention (authored by the server operator). Load it
+    /// with [`read_config`](Self::read_config) and parse with your own
+    /// `toml`/`serde` types. For a non-TOML layout, ignore this and build a
+    /// name under [`config_dir`](Self::config_dir).
+    ///
+    /// 本插件的配置文件路径 `config/<插件名>.toml`。按约定只读（由服务器
+    /// 运营者编写）。用 [`read_config`](Self::read_config) 读取后，用你自己的
+    /// `toml`/`serde` 类型解析。需要非 TOML 布局时忽略它，在
+    /// [`config_dir`](Self::config_dir) 下自拼文件名。
+    pub fn config_path(&self) -> PathBuf {
+        PathBuf::from("config").join(format!("{}.toml", self.plugin_name))
+    }
+
+    /// The shared `config/` directory. Escape hatch for a non-default file
+    /// name or format — e.g. `ctx.config_dir().join("rules.json")`.
+    ///
+    /// 共享的 `config/` 目录。给想用非默认文件名/格式的插件的逃生舱，
+    /// 例如 `ctx.config_dir().join("rules.json")`。
+    pub fn config_dir(&self) -> PathBuf {
+        PathBuf::from("config")
+    }
+
+    /// Read this plugin's config file ([`config_path`](Self::config_path)) as
+    /// a string. `None` if it doesn't exist or can't be read; parse the text
+    /// yourself. Cheap from `on_load`; don't call it every tick.
+    ///
+    /// 把本插件的配置文件（[`config_path`](Self::config_path)）读成字符串。
+    /// 文件不存在或读取失败时返回 `None`；文本自行解析。适合在 `on_load`
+    /// 调用，别每帧调。
+    pub fn read_config(&self) -> Option<String> {
+        std::fs::read_to_string(self.config_path()).ok()
+    }
+
+    /// This plugin's private storage directory, `data/<plugin-name>/`. The
+    /// directory is created if missing. Read, write, and create files here
+    /// freely — contents and format are the plugin's own (a JSON state file,
+    /// a SQLite db, whatever). Each plugin gets its own directory; isolation
+    /// is by convention (plugins are trusted code).
+    ///
+    /// **Threading:** the returned `PathBuf` is `Send` — store it and do
+    /// heavy/frequent writes from your own background thread to avoid
+    /// blocking the game's main thread inside event callbacks.
+    ///
+    /// 本插件的私有存储目录 `data/<插件名>/`。目录不存在会被创建。在这里
+    /// 自由读写创建文件——内容和格式由插件自定（JSON 状态文件、SQLite 库
+    /// 等）。每个插件有各自的目录；隔离按约定（插件是可信代码）。
+    ///
+    /// **线程：** 返回的 `PathBuf` 是 `Send`——可存下它、在自己的后台线程做
+    /// 重/频繁写入，避免在事件回调里阻塞游戏主线程。
+    pub fn data_dir(&self) -> PathBuf {
+        let dir = PathBuf::from("data").join(self.plugin_name);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
     }
 }

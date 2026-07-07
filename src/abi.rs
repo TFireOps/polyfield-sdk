@@ -19,7 +19,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 /// Bump when the vtable or any event layout changes in a way that requires
 /// recompiling plugins. The framework refuses to load plugins whose
 /// manifest reports a different value.
-pub const POLYFIELD_ABI_VERSION: u32 = 22;
+pub const POLYFIELD_ABI_VERSION: u32 = 31;
 
 pub const POLYFIELD_ENTRY_SYMBOL: &[u8] = b"polyfield_plugin_entry\0";
 
@@ -70,13 +70,13 @@ pub struct HostApi {
     // 硬编码的 C# 方法，不依赖 `polyfield.toml`。
     pub player_is_host: unsafe extern "C" fn(PlayerRef) -> bool,
     pub player_set_health: unsafe extern "C" fn(PlayerRef, health: i32, flag: i32),
-    pub player_show_error: unsafe extern "C" fn(PlayerRef, title: *const c_char, body: *const c_char),
+    pub player_show_error:
+        unsafe extern "C" fn(PlayerRef, title: *const c_char, body: *const c_char),
     pub player_kill: unsafe extern "C" fn(PlayerRef),
     pub player_kick_me: unsafe extern "C" fn(PlayerRef, delay_secs: f32),
     /// Reads the player's network IP via Mirror's connection chain.
     /// `out_buf, cap -> required` convention.
-    pub player_ip:
-        unsafe extern "C" fn(PlayerRef, out_buf: *mut c_char, cap: usize) -> usize,
+    pub player_ip: unsafe extern "C" fn(PlayerRef, out_buf: *mut c_char, cap: usize) -> usize,
     /// Reads the player's GameObject name (slot identifier like "Player3").
     /// `out_buf, cap -> required` convention.
     pub player_unity_name:
@@ -96,7 +96,6 @@ pub struct HostApi {
     // 游戏级单例访问器。直接调用 Polyfield 已知的 C# 方法
     // （GameManager、ServerEntityInspector）。三者都使用
     // `out_buf, cap -> required` 约定；返回空串表示单例或方法未解析。
-
     /// `GameManager.Instance.GetMapName()` with the `"-"` suffix stripped.
     pub game_map: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
 
@@ -142,7 +141,6 @@ pub struct HostApi {
     pub vehicles: unsafe extern "C" fn(out: *mut *const PlayerRef, len: *mut usize),
 
     // ── v22 additions ───────────────────────────────────────────────────────
-
     /// Get every online player's `PlayerControl` ref. Same out-pointer
     /// convention as [`vehicles`](Self::vehicles): the host fills `out`
     /// with a pointer to its internal array and `len` with the count.
@@ -163,7 +161,8 @@ pub struct HostApi {
     /// 向指定玩家发送聊天消息（真正的私聊）。通过 Mirror 的
     /// `SendTargetRPCInternal` 将 `RpcSendChat` 只投递给目标玩家的客户端。
     /// sender、target 或其连接不可解析时为空操作。
-    pub player_send_chat: unsafe extern "C" fn(sender: PlayerRef, target: PlayerRef, msg: *const c_char),
+    pub player_send_chat:
+        unsafe extern "C" fn(sender: PlayerRef, target: PlayerRef, msg: *const c_char),
 
     /// Force a player's display name via `PlayerControl.RpcUpdateName`.
     ///
@@ -224,6 +223,145 @@ pub struct HostApi {
     /// `on_timer`。调度由宿主负责；插件靠 `token` 区分是哪个定时器。
     /// v22 不支持取消——`token` 请取得有意义。
     pub schedule_once: unsafe extern "C" fn(delay_ms: u64, token: u64),
+
+    // ── v24 additions ───────────────────────────────────────────────────────
+    /// Update a player's bottom-left HUD line via
+    /// `PlayerControl.RpcUpdateLatency(latency, user_state, admin_data)`.
+    ///
+    /// `broadcast = false` → delivered only to that player's own client via
+    /// Mirror's `SendTargetRPCInternal` (targeted). `broadcast = true` →
+    /// delivered to all clients via the default `RpcUpdateLatency` weaver
+    /// stub (`SendRPCInternal`, includeOwner). The client only renders the
+    /// `admin_data` text when `user_state == 2`.
+    ///
+    /// 通过 `PlayerControl.RpcUpdateLatency(latency, user_state, admin_data)`
+    /// 更新玩家左下角 HUD 行。`broadcast = false` 经 Mirror
+    /// `SendTargetRPCInternal` 只投递给该玩家自己的客户端（定向）；
+    /// `broadcast = true` 经默认 `RpcUpdateLatency` weaver stub 广播给所有
+    /// 客户端。仅当 `user_state == 2` 时客户端才渲染 `admin_data` 文字。
+    pub player_update_latency: unsafe extern "C" fn(
+        PlayerRef,
+        latency: i32,
+        user_state: u8,
+        admin_data: *const c_char,
+        broadcast: bool,
+    ),
+
+    // ── v26 additions ─────────────────────────────────────────────────────────
+    /// Read `GameManager.Instance.DAMAGE_FACTOR` — the server-wide integer
+    /// damage multiplier applied in `ClientKillLogics` (actual HP lost is
+    /// `rpc_damage * DAMAGE_FACTOR`). Returns `1` when unavailable, so the
+    /// multiplier is a no-op by default.
+    ///
+    /// 读取 `GameManager.Instance.DAMAGE_FACTOR` —— 服务器全局整数伤害
+    /// 乘数，`ClientKillLogics` 里实际扣血 = `rpc 伤害 * DAMAGE_FACTOR`。
+    /// 不可用时返回 `1`，乘数默认无副作用。
+    pub game_damage_factor: unsafe extern "C" fn() -> i32,
+
+    /// Write a `Vec3` `PlayerControl` field by its [`PlayerField`] id — the
+    /// write-side counterpart of [`player_read_vec3`](Self::player_read_vec3).
+    /// Currently used to zero `_netTransform._recivedVel` to freeze a
+    /// teleport / stutter exploit. No-op if the field id isn't a known Vec3
+    /// offset or `this` looks invalid.
+    ///
+    /// 按 [`PlayerField`] id 写入一个 `Vec3` 字段，是
+    /// [`player_read_vec3`](Self::player_read_vec3) 的写入对侧。当前用于把
+    /// `_netTransform._recivedVel` 清零以冻结瞬移 / 抖动作弊。字段 id 非
+    /// 已知 Vec3 偏移、或 `this` 非法时为空操作。
+    pub player_write_vec3: unsafe extern "C" fn(PlayerRef, PlayerField, in_xyz: *const f32),
+
+    // ── v27 additions ─────────────────────────────────────────────────────────
+    /// The verified player account id for this player ref, or `0` if not
+    /// logged in. Backed by the framework's JWT verification at join (the mod
+    /// sends a panel-signed JWT in the deviceID arg; the framework checks it
+    /// against the panel public key). Trustworthy — signature-checked.
+    ///
+    /// 该玩家 ref 已验证的账号 id，未登录则 `0`。来自框架在加入时的 JWT
+    /// 验证（mod 在 deviceID 参数里发 panel 签名的 JWT，框架用 panel 公钥
+    /// 校验）。可信——已验签。
+    pub player_account_id: unsafe extern "C" fn(PlayerRef) -> u64,
+
+    // ── v28 additions ─────────────────────────────────────────────────────────
+    /// The server's configured map pool — the `match map` value from
+    /// `ServerConfig.txt`, entries joined with `'\n'`. `out_buf, cap ->
+    /// required` convention. Read-only; never writes the config file.
+    ///
+    /// 服务器配置的地图池 —— `ServerConfig.txt` 的 `match map` 值，各项以
+    /// `'\n'` 连接。`out_buf, cap -> required` 约定。只读，绝不写配置文件。
+    pub server_maps: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// The currently pending next-map override (what `server_set_next_map`
+    /// queued), or empty string if none. `out_buf, cap -> required`
+    /// convention.
+    ///
+    /// 当前待生效的下一局换图覆盖值（`server_set_next_map` 排队的内容），
+    /// 无则空串。`out_buf, cap -> required` 约定。
+    pub server_next_map: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// Queue `name` as the next round's map (intercepts
+    /// `MapManager.set_CustomMapName` next round; does not touch
+    /// `ServerConfig.txt` or `PlayerPrefs`). Returns `false` if `name` isn't
+    /// in the configured pool. Empty `name` clears the pending override and
+    /// returns `true`.
+    ///
+    /// 把 `name` 排队为下一局地图（下一局拦截 `MapManager.set_CustomMapName`；
+    /// 不动 `ServerConfig.txt` 与 `PlayerPrefs`）。`name` 不在配置的地图池内
+    /// 返回 `false`。`name` 为空则清除待生效覆盖并返回 `true`。
+    pub server_set_next_map: unsafe extern "C" fn(name: *const c_char) -> bool,
+
+    // ── v29 additions ─────────────────────────────────────────────────────────
+    /// `GameManager.serverLink` — the public list-server endpoint URL. It's a
+    /// Unity serialized field (not a string literal in the DLL), so plugins
+    /// can't read it themselves. `out_buf, cap -> required`; empty if unresolved.
+    pub server_link: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// Server region — `PlayerPrefs["Region"]`, or `"Unknown"`.
+    /// `out_buf, cap -> required`.
+    pub server_region: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// `Application.version`. `out_buf, cap -> required`; empty if unresolved.
+    pub game_version: unsafe extern "C" fn(out_buf: *mut c_char, cap: usize) -> usize,
+
+    /// Transport listen port (`KcpTransport.port`, via Mirror `Transport.active`).
+    /// `0` if unresolved.
+    pub server_port: unsafe extern "C" fn() -> u16,
+
+    /// `NetworkManager.singleton.maxConnections`. `0` if unresolved.
+    pub max_players: unsafe extern "C" fn() -> u32,
+
+    /// `NetworkManager.singleton.numPlayers` — current player count. Returns
+    /// `u32::MAX` when unresolved (so the SDK surfaces `None`); a real count of
+    /// `0` is distinct and valid.
+    pub player_count: unsafe extern "C" fn() -> u32,
+
+    // ── v30 additions ─────────────────────────────────────────────────────────
+    /// `GameUtility.GetExplosionDamage(pos, dmgType, weaponID)` — server-side
+    /// authoritative recompute of an explosion's per-target damage. `in_xyz`
+    /// points to the blast position `[x,y,z]`; `dmg_type` is the raw DamageType
+    /// (grenade/shell/launcher/...); `weapon_id` is the GadgetModel for
+    /// launchers. Writes the game's `"\n名字:伤害\n..."` string into the buffer
+    /// (`out_buf, cap -> required`); empty if class/method unresolved. Must be
+    /// called on the game thread (the `on_damage` hook is).
+    pub game_explosion_damage: unsafe extern "C" fn(
+        in_xyz: *const f32,
+        dmg_type: i32,
+        weapon_id: i32,
+        out_buf: *mut c_char,
+        cap: usize,
+    ) -> usize,
+
+    // ── v31 additions ─────────────────────────────────────────────────────────
+    /// Delete a single key from the shared KV store (full key, as stored).
+    ///
+    /// 从共享 KV 删除单个 key（传完整 key，如已加命名空间的或全局的）。
+    pub kv_del: unsafe extern "C" fn(key: *const c_char),
+
+    /// Delete every key whose name starts with `prefix` — bulk family reset
+    /// (e.g. per-round clear of kick markers `pf:kicked_dev:`).
+    ///
+    /// 删除所有以 `prefix` 开头的 key——批量族重置（如每局清空踢出标记
+    /// `pf:kicked_dev:`）。
+    pub kv_clear_prefix: unsafe extern "C" fn(prefix: *const c_char),
 }
 
 #[doc(hidden)]
@@ -246,11 +384,9 @@ pub struct PluginVTable {
     /// (blocking it would prevent the new game from initialising).
     pub on_game_start: unsafe extern "C" fn(*mut (), *const GameStartEvent, &'static HostApi),
     /// Interceptable: returns `true` to forward, `false` to skip the original RPC.
-    pub on_respawn:
-        unsafe extern "C" fn(*mut (), *mut RespawnEvent, &'static HostApi) -> bool,
+    pub on_respawn: unsafe extern "C" fn(*mut (), *mut RespawnEvent, &'static HostApi) -> bool,
     /// Interceptable: returns `true` to forward, `false` to skip the original RPC.
-    pub on_grenade:
-        unsafe extern "C" fn(*mut (), *mut GrenadeEvent, &'static HostApi) -> bool,
+    pub on_grenade: unsafe extern "C" fn(*mut (), *mut GrenadeEvent, &'static HostApi) -> bool,
     /// Interceptable: returns `true` to forward, `false` to skip the original RPC.
     pub on_shoot: unsafe extern "C" fn(*mut (), *mut ShootEvent, &'static HostApi) -> bool,
     /// Notification — fires when a player starts reloading.
@@ -263,7 +399,6 @@ pub struct PluginVTable {
         unsafe extern "C" fn(*mut (), *mut VehicleRepairEvent, &'static HostApi) -> bool,
 
     // ── v22 additions ───────────────────────────────────────────────────────
-
     /// Inbound command from the management backend. `name` and `args`
     /// (a single string the plugin parses) are null-terminated. The
     /// plugin writes an optional UTF-8 response into `out_buf` using the
@@ -348,8 +483,8 @@ unsafe fn with_cell<'a>(state: *mut ()) -> &'a mut Cell {
 /// Crucially this never re-panics, so the FFI boundary stays sound.
 unsafe fn report_panic(host: &HostApi, plugin: &str, hook: &str) {
     let p = CString::new(plugin).unwrap_or_default();
-    let m = CString::new(format!("panicked in {hook} (caught — not propagated)"))
-        .unwrap_or_default();
+    let m =
+        CString::new(format!("panicked in {hook} (caught — not propagated)")).unwrap_or_default();
     (host.log)(LogLevel::Error, p.as_ptr(), m.as_ptr());
 }
 
@@ -431,7 +566,11 @@ unsafe extern "C" fn on_player_join(
         c.plugin.on_player_join(&*evt, &Ctx::new(host, c.name))
     });
 }
-unsafe extern "C" fn on_damage(state: *mut (), evt: *mut DamageEvent, host: &'static HostApi) -> bool {
+unsafe extern "C" fn on_damage(
+    state: *mut (),
+    evt: *mut DamageEvent,
+    host: &'static HostApi,
+) -> bool {
     let c = with_cell(state);
     guard_intercept(host, c.name, "on_damage", || {
         c.plugin.on_damage(&mut *evt, &Ctx::new(host, c.name))
@@ -455,7 +594,11 @@ unsafe extern "C" fn on_chat(state: *mut (), evt: *mut ChatEvent, host: &'static
         c.plugin.on_chat(&mut *evt, &Ctx::new(host, c.name))
     })
 }
-unsafe extern "C" fn on_game_start(state: *mut (), evt: *const GameStartEvent, host: &'static HostApi) {
+unsafe extern "C" fn on_game_start(
+    state: *mut (),
+    evt: *const GameStartEvent,
+    host: &'static HostApi,
+) {
     let c = with_cell(state);
     guard_notify(host, c.name, "on_game_start", || {
         c.plugin.on_game_start(&*evt, &Ctx::new(host, c.name))
@@ -504,7 +647,8 @@ unsafe extern "C" fn on_vehicle_shoot(
 ) -> bool {
     let c = with_cell(state);
     guard_intercept(host, c.name, "on_vehicle_shoot", || {
-        c.plugin.on_vehicle_shoot(&mut *evt, &Ctx::new(host, c.name))
+        c.plugin
+            .on_vehicle_shoot(&mut *evt, &Ctx::new(host, c.name))
     })
 }
 unsafe extern "C" fn on_vehicle_repair(
@@ -514,7 +658,8 @@ unsafe extern "C" fn on_vehicle_repair(
 ) -> bool {
     let c = with_cell(state);
     guard_intercept(host, c.name, "on_vehicle_repair", || {
-        c.plugin.on_vehicle_repair(&mut *evt, &Ctx::new(host, c.name))
+        c.plugin
+            .on_vehicle_repair(&mut *evt, &Ctx::new(host, c.name))
     })
 }
 unsafe extern "C" fn on_command(
@@ -531,7 +676,8 @@ unsafe extern "C" fn on_command(
     let name_s = cstr_borrow(name);
     let args_s = cstr_borrow(args);
     let resp = match catch_unwind(AssertUnwindSafe(|| {
-        c.plugin.on_command(&name_s, &args_s, &Ctx::new(host, c.name))
+        c.plugin
+            .on_command(&name_s, &args_s, &Ctx::new(host, c.name))
     })) {
         Ok(r) => r,
         Err(_) => {

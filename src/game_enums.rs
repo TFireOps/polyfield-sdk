@@ -113,6 +113,46 @@ impl fmt::Display for GadgetId {
     }
 }
 
+// ── WeaponType ──────────────────────────────────────────────────────────────
+
+/// Category of thing a `RpcShoot` fired — the first byte of the shoot RPC.
+/// Tells you how to interpret the player's `currWeaponID`: as a [`WeaponId`]
+/// (firearm) or a [`GadgetId`] (equipment).
+///
+/// `RpcShoot` 首字节代表的开火类别。决定如何解读玩家的 `currWeaponID`：
+/// 按 [`WeaponId`]（枪械）还是 [`GadgetId`]（装备/道具）。
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WeaponType {
+    /// A primary/secondary firearm — `currWeaponID` maps via [`WeaponId`].
+    Weapon = 0,
+    /// A gadget/equipment item — `currWeaponID` maps via [`GadgetId`].
+    Gadget = 1,
+}
+
+impl WeaponType {
+    pub fn from_raw(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Weapon),
+            1 => Some(Self::Gadget),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Weapon => "weapon",
+            Self::Gadget => "gadget",
+        }
+    }
+}
+
+impl fmt::Display for WeaponType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 // ── WeaponId ──────────────────────────────────────────────────────────────
 
 /// Primary / secondary weapon identifiers.
@@ -131,6 +171,12 @@ pub enum WeaponId {
     Mg34 = 7,
     M2Browning = 8,
     Welrod = 9,
+    // 0.7.5 新增
+    ThompsonM1A1 = 10,
+    M3GreaseGun = 11,
+    WaltherP38 = 12,
+    Bar1918A2 = 13,
+    Vg15 = 14,
 }
 
 impl WeaponId {
@@ -146,6 +192,11 @@ impl WeaponId {
             7 => Some(Self::Mg34),
             8 => Some(Self::M2Browning),
             9 => Some(Self::Welrod),
+            10 => Some(Self::ThompsonM1A1),
+            11 => Some(Self::M3GreaseGun),
+            12 => Some(Self::WaltherP38),
+            13 => Some(Self::Bar1918A2),
+            14 => Some(Self::Vg15),
             _ => None,
         }
     }
@@ -162,6 +213,11 @@ impl WeaponId {
             Self::Mg34 => "MG34",
             Self::M2Browning => "M2Browning",
             Self::Welrod => "Welrod",
+            Self::ThompsonM1A1 => "Thompson M1A1",
+            Self::M3GreaseGun => "M3 Grease Gun",
+            Self::WaltherP38 => "Walther P38",
+            Self::Bar1918A2 => "BAR 1918A2",
+            Self::Vg15 => "VG1-5",
         }
     }
 }

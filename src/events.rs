@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::context::Ctx;
-use crate::game_enums::{DamageType, GadgetId, WeaponId};
+use crate::game_enums::{DamageType, GadgetId, WeaponId, WeaponType};
 use crate::player::Player;
 use crate::vehicle::Vehicle;
 /// Opaque reference to a player instance.
@@ -40,13 +40,18 @@ pub type PlayerRef = u64;
 /// 首次观测到某位玩家时触发；玩家改名时再次触发。**仅通知**——
 /// 观测加入无法阻止名字广播。
 ///
-/// Source: hooks `PlayerControl.RpcUpdateName(System.String)`. Mirror
-/// broadcasts that RPC to every client on join and on rename; the
-/// collector deduplicates so plugins see one event per actual change.
+/// Source: hooks `PlayerControl.UserCode_CmdSyncPlayersData__String__Int32__String`
+/// (`_name`, `_class`, `_deviceID`) — the RPC a client fires to sync its
+/// identity on join. At this point the object's `_playerID` / `deviceID`
+/// fields are **not written yet**, so [`name`](Self::name) and
+/// [`device_id`](Self::device_id) come from the RPC **arguments**; the
+/// collector deduplicates by player so plugins see one event per join/rename.
 ///
-/// 事件来源：Hook 了 `PlayerControl.RpcUpdateName(System.String)`。
-/// Mirror 会在玩家加入或改名时把该 RPC 广播给所有客户端；collector
-/// 内部做了去重，所以插件每次真实改名只会收到一次。
+/// 事件来源：Hook 了 `PlayerControl.UserCode_CmdSyncPlayersData__String__Int32__String`
+/// （`_name`、`_class`、`_deviceID`）——客户端加入时同步身份数据的 RPC。
+/// 此刻对象的 `_playerID` / `deviceID` 字段**尚未写入**，故 [`name`](Self::name)
+/// 与 [`device_id`](Self::device_id) 取自 RPC **参数**；collector 按玩家去重，
+/// 每次加入/改名插件只收到一次。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerJoinEvent {
     /// Stable key for this player during the current session.
@@ -54,12 +59,35 @@ pub struct PlayerJoinEvent {
     /// 本局游戏内这位玩家的稳定键。
     pub player: PlayerRef,
 
-    /// The name Mirror just announced. May be empty if the incoming
-    /// string was null or failed UTF-16 decoding.
+    /// The synced player name, from the RPC `_name` argument (the object's
+    /// `_playerID` field isn't written yet at this hook). Empty if the
+    /// incoming string was null or failed UTF-16 decoding.
     ///
-    /// Mirror 刚刚广播的名字。如果入参为 null 或 UTF-16 解码失败，
-    /// 这里可能是空串。
+    /// 同步的玩家名字，取自 RPC `_name` 参数（此刻对象 `_playerID` 字段尚未
+    /// 写入）。入参为 null 或 UTF-16 解码失败时为空串。
     pub name: String,
+
+    /// The client device fingerprint, from the RPC `_deviceID` argument (the
+    /// object's `deviceID` field isn't written yet at this hook). **Empty for
+    /// logged-in players** — when the mod sends a JWT here instead, the
+    /// framework verifies it (see [`account_id`](Self::account_id)) and clears
+    /// this field so the token isn't mistaken for a fingerprint.
+    ///
+    /// 客户端设备指纹，取自 RPC `_deviceID` 参数（此刻对象 `deviceID` 字段
+    /// 尚未写入）。**登录玩家此处为空**——mod 改发 JWT 时框架会验签（见
+    /// [`account_id`](Self::account_id)）并清空本字段，避免把 token 当成指纹。
+    pub device_id: String,
+
+    /// Verified player account id (the JWT `sub`), or `0` if the player isn't
+    /// logged in. The framework sets this after verifying the JWT the mod sent
+    /// in the deviceID arg against the panel's public key. **Trustworthy**
+    /// (signature-checked) — prefer it over `device_id` for identity, bans,
+    /// op, and stats.
+    ///
+    /// 已验证的玩家账号 id（JWT 的 `sub`），未登录则为 `0`。框架用 panel 公钥
+    /// 验证 mod 在 deviceID 参数里发来的 JWT 后写入。**可信**（已验签）——
+    /// 身份、封禁、op、战绩都应优先用它而非 `device_id`。
+    pub account_id: u64,
 }
 
 impl PlayerJoinEvent {
@@ -181,6 +209,15 @@ impl DamageEvent {
     /// 带类型的道具 ID（装备栏）。未知时返回 `None`。
     pub fn gadget_enum(&self) -> Option<GadgetId> {
         GadgetId::from_raw(self.weapon_id)
+    }
+
+    /// `true` if this damage was a headshot. The game encodes the headshot
+    /// flag in the RPC's [`data`](Self::data) string as `"1"`.
+    ///
+    /// 是否爆头。游戏在 RPC 的 [`data`](Self::data) 字符串里用 `"1"` 编码
+    /// 爆头标志。
+    pub fn is_headshot(&self) -> bool {
+        self.data == "1"
     }
 }
 
@@ -355,10 +392,26 @@ impl GrenadeEvent {
 pub struct ShootEvent {
     pub player: PlayerRef,
 
-    /// Weapon type id.
+    /// Weapon **category** — the first byte of `RpcShoot`. `0` = a firearm
+    /// (interpret [`weapon_id`](Self::weapon_id) as [`WeaponId`]), `1` = a
+    /// gadget (interpret it as [`GadgetId`]). This is **not** the specific
+    /// weapon model; use [`weapon`](Self::weapon) / [`gadget`](Self::gadget).
     ///
-    /// 武器类型 id。
+    /// 武器**类别** —— `RpcShoot` 的首字节。`0` = 枪械（把
+    /// [`weapon_id`](Self::weapon_id) 按 [`WeaponId`] 解读），`1` = 道具
+    /// （按 [`GadgetId`] 解读）。这**不是**具体型号；取型号用
+    /// [`weapon`](Self::weapon) / [`gadget`](Self::gadget)。
     pub weapon_type: u8,
+
+    /// The actual weapon model id, read from `PlayerCombat.currWeaponID` at
+    /// fire time. Interpret it according to [`weapon_type`](Self::weapon_type):
+    /// as a [`WeaponId`] when the category is firearm, or a [`GadgetId`] when
+    /// gadget. `-1` if it couldn't be read.
+    ///
+    /// 实际武器型号 id，开火瞬间从 `PlayerCombat.currWeaponID` 读取。按
+    /// [`weapon_type`](Self::weapon_type) 解读：枪械→[`WeaponId`]，
+    /// 道具→[`GadgetId`]。读取失败时为 `-1`。
+    pub weapon_id: i32,
 
     /// Shoot data string (trajectory / target info — game-specific).
     /// **Mutable** — modify before returning `true` to forward with
@@ -373,13 +426,46 @@ impl ShootEvent {
         ctx.player(self.player)
     }
 
-    /// Typed weapon id (primary/secondary firearms). `None` if unknown.
-    pub fn weapon(&self) -> Option<WeaponId> {
-        WeaponId::from_raw(self.weapon_type as i32)
+    /// The fire category (firearm vs gadget). `None` if the raw byte isn't
+    /// a recognised [`WeaponType`].
+    ///
+    /// 开火类别（枪械 / 道具）。原始字节非已知 [`WeaponType`] 时返回 `None`。
+    pub fn weapon_type_enum(&self) -> Option<WeaponType> {
+        WeaponType::from_raw(self.weapon_type as i32)
     }
 
-    /// Deprecated alias for [`weapon`](Self::weapon).
-    #[deprecated(note = "renamed to weapon() for consistency with Player::weapon()")]
+    /// The fired **firearm** as a typed [`WeaponId`], resolved from
+    /// [`weapon_id`](Self::weapon_id). `None` when this shot was a gadget
+    /// (use [`gadget`](Self::gadget)) or the id is unknown.
+    ///
+    /// 开火的**枪械**型号（由 [`weapon_id`](Self::weapon_id) 解析）。本次为
+    /// 道具（改用 [`gadget`](Self::gadget)）或 id 未知时返回 `None`。
+    pub fn weapon(&self) -> Option<WeaponId> {
+        match self.weapon_type_enum() {
+            Some(WeaponType::Weapon) => WeaponId::from_raw(self.weapon_id),
+            _ => None,
+        }
+    }
+
+    /// The fired **gadget** as a typed [`GadgetId`], resolved from
+    /// [`weapon_id`](Self::weapon_id). `None` when this shot was a firearm
+    /// (use [`weapon`](Self::weapon)) or the id is unknown.
+    ///
+    /// 开火的**道具**（由 [`weapon_id`](Self::weapon_id) 解析）。本次为枪械
+    /// （改用 [`weapon`](Self::weapon)）或 id 未知时返回 `None`。
+    pub fn gadget(&self) -> Option<GadgetId> {
+        match self.weapon_type_enum() {
+            Some(WeaponType::Gadget) => GadgetId::from_raw(self.weapon_id),
+            _ => None,
+        }
+    }
+
+    /// Deprecated: the old `weapon()` mis-mapped the category byte as a
+    /// weapon model. Use [`weapon`](Self::weapon) (now backed by the real
+    /// `currWeaponID`) or [`weapon_type_enum`](Self::weapon_type_enum).
+    #[deprecated(
+        note = "weapon_type is a category, not a model; use weapon() / gadget() / weapon_type_enum()"
+    )]
     pub fn weapon_enum(&self) -> Option<WeaponId> {
         self.weapon()
     }

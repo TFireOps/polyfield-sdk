@@ -101,29 +101,41 @@ impl<'ctx> Player<'ctx> {
     ///
     /// 玩家**可编辑的显示名**（来自 `_playerID` 字段）。玩家未改名
     /// 时默认是 `"Player<N>"`。字段为 null 或解析失败时为空串。
-    pub fn name(&self) -> String { self.read_string(f::F_PLAYER_ID) }
+    pub fn name(&self) -> String {
+        self.read_string(f::F_PLAYER_ID)
+    }
 
     /// `deviceID` — fingerprint identifier reported by the client.
     ///
     /// `deviceID` —— 客户端上报的设备指纹标识。
-    pub fn device_id(&self) -> String { self.read_string(f::F_DEVICE_ID) }
+    pub fn device_id(&self) -> String {
+        self.read_string(f::F_DEVICE_ID)
+    }
 
     /// `team` — team tag string.
     ///
     /// `team` —— 队伍标签字符串。
-    pub fn team(&self) -> String { self.read_string(f::F_TEAM) }
+    pub fn team(&self) -> String {
+        self.read_string(f::F_TEAM)
+    }
 
     /// `groundType` — surface tag of whatever the player is standing on.
     ///
     /// `groundType` —— 玩家脚下表面的标签。
-    pub fn ground_type(&self) -> String { self.read_string(f::F_GROUND_TYPE) }
+    pub fn ground_type(&self) -> String {
+        self.read_string(f::F_GROUND_TYPE)
+    }
 
     // ── Lifecycle / state ───────────────────────────────────────────────
 
     /// `health` — current HP.
-    pub fn health(&self) -> i32 { self.read_i32(f::F_HEALTH) }
+    pub fn health(&self) -> i32 {
+        self.read_i32(f::F_HEALTH)
+    }
     /// `healthRegenCooldown` — seconds remaining before HP regen.
-    pub fn health_regen_cooldown(&self) -> f32 { self.read_f32(f::F_HEALTH_REGEN_COOLDOWN) }
+    pub fn health_regen_cooldown(&self) -> f32 {
+        self.read_f32(f::F_HEALTH_REGEN_COOLDOWN)
+    }
     /// `dead` flag — `true` if the game flagged the player as dead,
     /// or if their health has dropped to `0` or below. The latter
     /// catches the brief window between damage application and the
@@ -136,14 +148,22 @@ impl<'ctx> Player<'ctx> {
         self.read_bool(f::F_DEAD) || self.health() <= 0
     }
     /// `ready` — ready-up state in lobby/match flow.
-    pub fn is_ready(&self) -> bool { self.read_bool(f::F_READY) }
+    pub fn is_ready(&self) -> bool {
+        self.read_bool(f::F_READY)
+    }
     /// `respawnTimer` — seconds until respawn.
-    pub fn respawn_timer(&self) -> f32 { self.read_f32(f::F_RESPAWN_TIMER) }
+    pub fn respawn_timer(&self) -> f32 {
+        self.read_f32(f::F_RESPAWN_TIMER)
+    }
     /// `doneLoadingMap` — finished loading the current map.
-    pub fn done_loading_map(&self) -> bool { self.read_bool(f::F_DONE_LOADING_MAP) }
+    pub fn done_loading_map(&self) -> bool {
+        self.read_bool(f::F_DONE_LOADING_MAP)
+    }
     /// `myState` — raw `UserState` integer. See [`user_state`](Self::user_state)
     /// for the typed view.
-    pub fn user_state_raw(&self) -> i32 { self.read_i32(f::F_USER_STATE) }
+    pub fn user_state_raw(&self) -> i32 {
+        self.read_i32(f::F_USER_STATE)
+    }
     /// `myState` as a typed [`UserState`]. `None` if the game sent an
     /// unknown value.
     ///
@@ -153,7 +173,9 @@ impl<'ctx> Player<'ctx> {
     }
     /// `myClass` — raw `ClassRole` integer. See [`class_role`](Self::class_role)
     /// for the typed view.
-    pub fn class_role_raw(&self) -> i32 { self.read_i32(f::F_CLASS_ROLE) }
+    pub fn class_role_raw(&self) -> i32 {
+        self.read_i32(f::F_CLASS_ROLE)
+    }
     /// `myClass` as a typed [`ClassRole`]. `None` if the game sent an
     /// unknown value.
     ///
@@ -164,17 +186,39 @@ impl<'ctx> Player<'ctx> {
 
     // ── Stats / counters ────────────────────────────────────────────────
 
-    pub fn kill_count(&self) -> i32 { self.read_i32(f::F_KILL_COUNT) }
-    pub fn death_count(&self) -> i32 { self.read_i32(f::F_DEATH_COUNT) }
-    pub fn bullets_fired(&self) -> i32 { self.read_i32(f::F_BULLETS_FIRED) }
-    pub fn grenades_thrown(&self) -> i32 { self.read_i32(f::F_GRENADES_THROWN) }
-    pub fn reloads_done(&self) -> i32 { self.read_i32(f::F_RELOADS_DONE) }
-    pub fn kill_rate(&self) -> i32 { self.read_i32(f::F_KILL_RATE) }
-    pub fn damage_rate(&self) -> i32 { self.read_i32(f::F_DAMAGE_RATE) }
-    pub fn network_rate(&self) -> i32 { self.read_i32(f::F_NETWORK_RATE) }
-    pub fn latency_rate(&self) -> i32 { self.read_i32(f::F_LATENCY_RATE) }
-    pub fn ping_warn(&self) -> i32 { self.read_i32(f::F_PING_WARN) }
-    pub fn teamkill_warn(&self) -> i32 { self.read_i32(f::F_TEAMKILL_WARN) }
+    pub fn kill_count(&self) -> i32 {
+        self.read_i32(f::F_KILL_COUNT)
+    }
+    pub fn death_count(&self) -> i32 {
+        self.read_i32(f::F_DEATH_COUNT)
+    }
+    pub fn bullets_fired(&self) -> i32 {
+        self.read_i32(f::F_BULLETS_FIRED)
+    }
+    pub fn grenades_thrown(&self) -> i32 {
+        self.read_i32(f::F_GRENADES_THROWN)
+    }
+    pub fn reloads_done(&self) -> i32 {
+        self.read_i32(f::F_RELOADS_DONE)
+    }
+    pub fn kill_rate(&self) -> i32 {
+        self.read_i32(f::F_KILL_RATE)
+    }
+    pub fn damage_rate(&self) -> i32 {
+        self.read_i32(f::F_DAMAGE_RATE)
+    }
+    pub fn network_rate(&self) -> i32 {
+        self.read_i32(f::F_NETWORK_RATE)
+    }
+    pub fn latency_rate(&self) -> i32 {
+        self.read_i32(f::F_LATENCY_RATE)
+    }
+    pub fn ping_warn(&self) -> i32 {
+        self.read_i32(f::F_PING_WARN)
+    }
+    pub fn teamkill_warn(&self) -> i32 {
+        self.read_i32(f::F_TEAMKILL_WARN)
+    }
 
     /// Kill/death ratio. Returns the kill count when the player hasn't
     /// died yet (avoids division by zero), `0.0` when both are zero.
@@ -210,12 +254,22 @@ impl<'ctx> Player<'ctx> {
     /// 用 [`net_velocity`](Self::net_velocity)）——例如地面速度用
     /// `Vec3::from(p.velocity()).magnitude_2d()`，它读的是同步过来的
     /// `_recivedVel`。
-    pub fn speed(&self) -> f32 { self.read_f32(f::F_PLAYER_SPEED) }
-    pub fn is_running(&self) -> bool { self.read_bool(f::F_RUNNING) }
-    pub fn is_grounded(&self) -> bool { self.read_bool(f::F_GROUNDED) }
+    pub fn speed(&self) -> f32 {
+        self.read_f32(f::F_PLAYER_SPEED)
+    }
+    pub fn is_running(&self) -> bool {
+        self.read_bool(f::F_RUNNING)
+    }
+    pub fn is_grounded(&self) -> bool {
+        self.read_bool(f::F_GROUNDED)
+    }
     /// `crouch` — crouch state level (int).
-    pub fn crouch(&self) -> i32 { self.read_i32(f::F_CROUCH) }
-    pub fn is_under_water(&self) -> bool { self.read_bool(f::F_IS_UNDER_WATER) }
+    pub fn crouch(&self) -> i32 {
+        self.read_i32(f::F_CROUCH)
+    }
+    pub fn is_under_water(&self) -> bool {
+        self.read_bool(f::F_IS_UNDER_WATER)
+    }
 
     /// World position, with a convenience fallback: returns
     /// `_netTransform._recivedPos`, or `lastPlayerPos` when the net
@@ -276,57 +330,110 @@ impl<'ctx> Player<'ctx> {
     }
 
     /// `_moveDir` — current movement direction vector.
-    pub fn move_dir(&self) -> [f32; 3] { self.read_vec3(f::F_MOVE_DIR) }
+    pub fn move_dir(&self) -> [f32; 3] {
+        self.read_vec3(f::F_MOVE_DIR)
+    }
 
     /// `_lookDir` — 2D look direction.
-    pub fn look_dir(&self) -> [f32; 2] { self.read_vec2(f::F_LOOK_DIR) }
+    pub fn look_dir(&self) -> [f32; 2] {
+        self.read_vec2(f::F_LOOK_DIR)
+    }
 
     /// [`position`](Self::position) as a [`Vec3`](crate::Vec3), for ergonomic
     /// distance math (`p.pos().distance_2d(other.pos())`).
     ///
     /// [`position`](Self::position) 的 [`Vec3`](crate::Vec3) 形式，方便做
     /// 距离运算（`p.pos().distance_2d(other.pos())`）。
-    pub fn pos(&self) -> crate::Vec3 { self.position().into() }
+    pub fn pos(&self) -> crate::Vec3 {
+        self.position().into()
+    }
 
     /// [`velocity`](Self::velocity) as a [`Vec3`](crate::Vec3). Pair with
     /// [`Vec3::magnitude_2d`](crate::Vec3::magnitude_2d) for ground speed.
     ///
     /// [`velocity`](Self::velocity) 的 [`Vec3`](crate::Vec3) 形式。配合
     /// [`Vec3::magnitude_2d`](crate::Vec3::magnitude_2d) 得地面速度。
-    pub fn vel(&self) -> crate::Vec3 { self.velocity().into() }
+    pub fn vel(&self) -> crate::Vec3 {
+        self.velocity().into()
+    }
 
     // ── Combat-adjacent ─────────────────────────────────────────────────
 
-    pub fn trying_to_attack(&self) -> f32 { self.read_f32(f::F_TRYING_TO_ATTACK) }
-    pub fn obstacle_timer(&self) -> f32 { self.read_f32(f::F_OBSTACLE_TIMER) }
-    pub fn expose_timer(&self) -> f32 { self.read_f32(f::F_EXPOSE_TIMER) }
-    pub fn dont_expose(&self) -> bool { self.read_bool(f::F_DONT_EXPOSE) }
+    pub fn trying_to_attack(&self) -> f32 {
+        self.read_f32(f::F_TRYING_TO_ATTACK)
+    }
+    pub fn obstacle_timer(&self) -> f32 {
+        self.read_f32(f::F_OBSTACLE_TIMER)
+    }
+    pub fn expose_timer(&self) -> f32 {
+        self.read_f32(f::F_EXPOSE_TIMER)
+    }
+    pub fn dont_expose(&self) -> bool {
+        self.read_bool(f::F_DONT_EXPOSE)
+    }
 
     // ── Input / camera ──────────────────────────────────────────────────
 
-    pub fn mouse_x(&self) -> f32 { self.read_f32(f::F_MOUSE_X) }
-    pub fn mouse_y(&self) -> f32 { self.read_f32(f::F_MOUSE_Y) }
-    pub fn input_x(&self) -> f32 { self.read_f32(f::F_INPUT_X) }
-    pub fn input_y(&self) -> f32 { self.read_f32(f::F_INPUT_Y) }
-    pub fn auto_sprint(&self) -> bool { self.read_bool(f::F_AUTO_SPRINT) }
-    pub fn head_bob(&self) -> bool { self.read_bool(f::F_HEAD_BOB) }
-    pub fn joystick_lean(&self) -> bool { self.read_bool(f::F_JOYSTICK_LEAN) }
-    pub fn cam_sensitivity(&self) -> f32 { self.read_f32(f::F_CAM_SENSITIVITY) }
-    pub fn ads_sensitivity(&self) -> f32 { self.read_f32(f::F_ADS_SENSITIVITY) }
-    pub fn gyro_look_sensitivity(&self) -> f32 { self.read_f32(f::F_GYRO_LOOK_SENSITIVITY) }
-    pub fn gyro_ads_sensitivity(&self) -> f32 { self.read_f32(f::F_GYRO_ADS_SENSITIVITY) }
-    pub fn local_cam_dist(&self) -> f32 { self.read_f32(f::F_LOCAL_CAM_DIST) }
-    pub fn cam_fov(&self) -> f32 { self.read_f32(f::F_CAM_FOV) }
-    pub fn cam_shake(&self) -> f32 { self.read_f32(f::F_CAM_SHAKE) }
-    pub fn default_lod_bias(&self) -> f32 { self.read_f32(f::F_DEFAULT_LOD_BIAS) }
+    pub fn mouse_x(&self) -> f32 {
+        self.read_f32(f::F_MOUSE_X)
+    }
+    pub fn mouse_y(&self) -> f32 {
+        self.read_f32(f::F_MOUSE_Y)
+    }
+    pub fn input_x(&self) -> f32 {
+        self.read_f32(f::F_INPUT_X)
+    }
+    pub fn input_y(&self) -> f32 {
+        self.read_f32(f::F_INPUT_Y)
+    }
+    pub fn auto_sprint(&self) -> bool {
+        self.read_bool(f::F_AUTO_SPRINT)
+    }
+    pub fn head_bob(&self) -> bool {
+        self.read_bool(f::F_HEAD_BOB)
+    }
+    pub fn joystick_lean(&self) -> bool {
+        self.read_bool(f::F_JOYSTICK_LEAN)
+    }
+    pub fn cam_sensitivity(&self) -> f32 {
+        self.read_f32(f::F_CAM_SENSITIVITY)
+    }
+    pub fn ads_sensitivity(&self) -> f32 {
+        self.read_f32(f::F_ADS_SENSITIVITY)
+    }
+    pub fn gyro_look_sensitivity(&self) -> f32 {
+        self.read_f32(f::F_GYRO_LOOK_SENSITIVITY)
+    }
+    pub fn gyro_ads_sensitivity(&self) -> f32 {
+        self.read_f32(f::F_GYRO_ADS_SENSITIVITY)
+    }
+    pub fn local_cam_dist(&self) -> f32 {
+        self.read_f32(f::F_LOCAL_CAM_DIST)
+    }
+    pub fn cam_fov(&self) -> f32 {
+        self.read_f32(f::F_CAM_FOV)
+    }
+    pub fn cam_shake(&self) -> f32 {
+        self.read_f32(f::F_CAM_SHAKE)
+    }
+    pub fn default_lod_bias(&self) -> f32 {
+        self.read_f32(f::F_DEFAULT_LOD_BIAS)
+    }
 
     // ── Network / latency ───────────────────────────────────────────────
 
-    /// `myLatency` — round-trip latency in milliseconds, as the game
-    /// most recently sampled it.
+    /// `myPing` — round-trip latency in milliseconds. Set server-side every
+    /// heartbeat from `connectionToClient.rtt * 1000` (`UserCode_CmdHeartBeat`),
+    /// and what `GetPing()` returns. The game has **no** `myLatency` field —
+    /// that was the original mis-mapping, which read a constant `0`.
     ///
-    /// `myLatency` —— 最近一次采样的往返延迟，单位毫秒。
-    pub fn latency(&self) -> f32 { self.read_f32(f::F_MY_LATENCY) }
+    /// `myPing` —— 往返延迟（毫秒）。服务端每次心跳由
+    /// `connectionToClient.rtt * 1000` 写入（`UserCode_CmdHeartBeat`），
+    /// 也是 `GetPing()` 的返回值。游戏**没有** `myLatency` 字段——原先
+    /// 误映射到它，读出的恒为 `0`。
+    pub fn latency(&self) -> f32 {
+        self.read_i32(f::F_MY_LATENCY) as f32
+    }
 
     /// Network IP address from `connectionToClient.address`.
     /// Returns an empty string if the connection isn't established.
@@ -334,9 +441,7 @@ impl<'ctx> Player<'ctx> {
     /// 来自 `connectionToClient.address` 的网络 IP 地址。连接未建立
     /// 时返回空串。
     pub fn ip(&self) -> String {
-        read_string_via(|buf, cap| unsafe {
-            (self.host.player_ip)(self.id, buf, cap)
-        })
+        read_string_via(|buf, cap| unsafe { (self.host.player_ip)(self.id, buf, cap) })
     }
 
     /// Currently equipped weapon id from `playerCombat.currWeaponID`.
@@ -344,7 +449,9 @@ impl<'ctx> Player<'ctx> {
     ///
     /// 当前装备武器 ID（来自 `playerCombat.currWeaponID`）。类型化视图
     /// 见 [`weapon`](Self::weapon)。
-    pub fn weapon_id(&self) -> i32 { self.read_i32(f::F_WEAPON_ID) }
+    pub fn weapon_id(&self) -> i32 {
+        self.read_i32(f::F_WEAPON_ID)
+    }
 
     /// Currently equipped weapon as a typed [`WeaponId`]. `None` if the
     /// raw id doesn't map to a known weapon.
@@ -369,15 +476,17 @@ impl<'ctx> Player<'ctx> {
     ///
     /// Backed by `UnityEngine.Object.get_name()`.
     pub fn unity_name(&self) -> String {
-        read_string_via(|buf, cap| unsafe {
-            (self.host.player_unity_name)(self.id, buf, cap)
-        })
+        read_string_via(|buf, cap| unsafe { (self.host.player_unity_name)(self.id, buf, cap) })
     }
 
     // ── Voting ──────────────────────────────────────────────────────────
 
-    pub fn vote_kicked(&self) -> bool { self.read_bool(f::F_VOTE_KICKED) }
-    pub fn voted(&self) -> bool { self.read_bool(f::F_VOTED) }
+    pub fn vote_kicked(&self) -> bool {
+        self.read_bool(f::F_VOTE_KICKED)
+    }
+    pub fn voted(&self) -> bool {
+        self.read_bool(f::F_VOTED)
+    }
 
     // ── Game-specific actions ───────────────────────────────────────────
 
@@ -507,6 +616,69 @@ impl<'ctx> Player<'ctx> {
         unsafe { (self.host.player_call_animation)(self.id, c.as_ptr()) };
     }
 
+    /// Update this player's **bottom-left HUD line** (the latency + admin
+    /// text block), delivered **only to this player's own client**. Backed
+    /// by a targeted `PlayerControl.RpcUpdateLatency` over Mirror.
+    ///
+    /// 更新该玩家的**左下角 HUD 行**（延迟 + 管理文本块），**只投递给该
+    /// 玩家自己的客户端**。底层是定向的 `PlayerControl.RpcUpdateLatency`。
+    ///
+    /// `latency` is the ping number shown; `admin_data` is the rich-text
+    /// content. **The client only renders the text when `user_state == 2`** —
+    /// pass `2` unless you have a reason not to. See [`set_corner_text`](Self::set_corner_text)
+    /// for the common case.
+    ///
+    /// `latency` 是显示的延迟数字；`admin_data` 是富文本内容。
+    /// **仅当 `user_state == 2` 时客户端才渲染文字**——一般传 `2`。
+    /// 常用场景见 [`set_corner_text`](Self::set_corner_text)。
+    ///
+    /// **Persistence / 持久性:** the game re-pushes its own latency line on a
+    /// timer, so a one-shot call is transient. To keep custom text visible,
+    /// re-push periodically (e.g. from [`Plugin::on_tick`](crate::Plugin::on_tick)).
+    ///
+    /// **持久性：** 游戏会用定时器周期性重推自己的延迟行，单次调用会被覆盖。
+    /// 要让自定义文本常驻，请周期性重推（例如在
+    /// [`Plugin::on_tick`](crate::Plugin::on_tick) 里）。
+    pub fn set_latency_display(&self, latency: i32, user_state: u8, admin_data: &str) {
+        let a = CString::new(admin_data).unwrap_or_default();
+        unsafe {
+            (self.host.player_update_latency)(self.id, latency, user_state, a.as_ptr(), false)
+        };
+    }
+
+    /// Like [`set_latency_display`](Self::set_latency_display) but **broadcast
+    /// to all clients** (Mirror's default `RpcUpdateLatency` behaviour)
+    /// instead of targeting only this player.
+    ///
+    /// 与 [`set_latency_display`](Self::set_latency_display) 相同，但**广播给
+    /// 所有客户端**（Mirror 默认 `RpcUpdateLatency` 行为），而非只发给该玩家。
+    ///
+    /// Same `user_state == 2` and persistence caveats apply.
+    ///
+    /// 同样适用 `user_state == 2` 与持久性的注意事项。
+    pub fn broadcast_latency_display(&self, latency: i32, user_state: u8, admin_data: &str) {
+        let a = CString::new(admin_data).unwrap_or_default();
+        unsafe {
+            (self.host.player_update_latency)(self.id, latency, user_state, a.as_ptr(), true)
+        };
+    }
+
+    /// Convenience: push `text` to this player's bottom-left display, using
+    /// the player's real latency and `user_state = 2` (the value that makes
+    /// the client render the text). Targeted to this player only.
+    ///
+    /// 便捷方法：把 `text` 推送到该玩家的左下角显示，自动带上玩家真实延迟和
+    /// `user_state = 2`（让客户端渲染文字的取值）。仅发给该玩家。
+    ///
+    /// Re-push periodically (e.g. in [`Plugin::on_tick`](crate::Plugin::on_tick))
+    /// to keep it visible — the game overwrites it on its own timer.
+    ///
+    /// 周期性重推（例如在 [`Plugin::on_tick`](crate::Plugin::on_tick) 里）以保持
+    /// 显示——游戏会用自己的定时器覆盖它。
+    pub fn set_corner_text(&self, text: &str) {
+        self.set_latency_display(self.latency() as i32, 2, text);
+    }
+
     // ── Vehicle association ─────────────────────────────────────────────────
 
     /// The vehicle this player is currently in, or `None` when on foot.
@@ -526,6 +698,49 @@ impl<'ctx> Player<'ctx> {
     /// 该玩家当前是否在载具中。
     pub fn is_in_vehicle(&self) -> bool {
         unsafe { (self.host.player_vehicle)(self.id) != 0 }
+    }
+
+    /// Overwrite the player's replicated velocity
+    /// (`_netTransform._recivedVel`). Mainly used to **freeze** a player by
+    /// writing a zero vector when a teleport / stutter exploit is detected
+    /// (position not advancing while velocity stays non-zero). Writes the
+    /// authoritative net-velocity field directly — see [`freeze`](Self::freeze)
+    /// for the common zero case.
+    ///
+    /// 覆盖玩家同步的速度（`_netTransform._recivedVel`）。主要用于检测到
+    /// 瞬移 / 抖动作弊（位置不前进但速度持续非零）时写零向量**冻结**玩家。
+    /// 直接写权威的网络速度字段，常用的清零见 [`freeze`](Self::freeze)。
+    pub fn set_velocity(&self, v: [f32; 3]) {
+        unsafe { (self.host.player_write_vec3)(self.id, f::F_NET_VELOCITY, v.as_ptr()) };
+    }
+
+    /// Zero the player's replicated velocity — convenience for
+    /// [`set_velocity`](Self::set_velocity)`([0.0; 3])`. Freezes a
+    /// teleport / stutter exploit in place.
+    ///
+    /// 把玩家同步速度清零——[`set_velocity`](Self::set_velocity)`([0.0; 3])`
+    /// 的便捷写法，就地冻结瞬移 / 抖动作弊。
+    pub fn freeze(&self) {
+        self.set_velocity([0.0, 0.0, 0.0]);
+    }
+
+    /// The verified player account id (panel JWT `sub`), or `0` if this player
+    /// isn't logged in. Trustworthy — the framework signature-checked the JWT
+    /// the mod sent at join, using the panel's public key. Prefer this over
+    /// [`device_id`](Self::device_id) for identity, op, bans, and stats.
+    ///
+    /// 已验证的玩家账号 id（panel JWT 的 `sub`），未登录则 `0`。可信——框架
+    /// 在加入时用 panel 公钥验过 mod 发来的 JWT 签名。身份 / op / 封禁 / 战绩
+    /// 都应优先用它，而非 [`device_id`](Self::device_id)。
+    pub fn account_id(&self) -> u64 {
+        unsafe { (self.host.player_account_id)(self.id) }
+    }
+
+    /// `true` if this player is logged in (has a verified account).
+    ///
+    /// 该玩家是否已登录（拥有已验证的账号）。
+    pub fn is_logged_in(&self) -> bool {
+        self.account_id() != 0
     }
 
     // ── Raw field escape hatch ──────────────────────────────────────────────
